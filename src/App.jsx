@@ -79,6 +79,10 @@ function App() {
 
   const handleSendMessage = useCallback(async (text) => {
     if (!text.trim()) return
+    const userMessage = { role: 'user', mode: activeMode, content: text }
+    setMessages((prev) => [...prev, userMessage])
+    setSendLoading(true)
+
     let projectId = activeProjectId
     if (!projectId) {
       try {
@@ -87,14 +91,14 @@ function App() {
         setActiveProjectId(project.id)
         projectId = project.id
         setMessages([])
+        setMessages([userMessage])
       } catch (err) {
-        console.error('Failed to create project', err)
+        setSendLoading(false)
+        setMessages((prev) => [...prev, { role: 'assistant', content: err.message || 'Could not create project. Is the backend running? (cd server && npm run dev)' }])
         return
       }
     }
-    setSendLoading(true)
-    const userMessage = { role: 'user', mode: activeMode, content: text }
-    setMessages((prev) => [...prev, userMessage])
+
     try {
       const result = await api.sendMessage(projectId, text, selectedModel, activeMode)
       setMessages((prev) => {
@@ -107,9 +111,10 @@ function App() {
         )
       }
     } catch (err) {
-      setMessages((prev) => prev.slice(0, -1))
-      console.error('Failed to send message', err)
-      setMessages((prev) => [...prev, userMessage, { role: 'assistant', mode: activeMode, content: err.message || 'Failed to get response.' }])
+      setMessages((prev) => {
+        const withoutLast = prev.slice(0, -1)
+        return [...withoutLast, userMessage, { role: 'assistant', content: err.message || 'Failed to get response.' }]
+      })
     } finally {
       setSendLoading(false)
     }
@@ -170,6 +175,7 @@ function App() {
           activeMode={activeMode}
           onModeChange={handleModeChange}
           hasProject={Boolean(activeProjectId)}
+          activeProjectId={activeProjectId}
         />
       </div>
     </div>

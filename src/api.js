@@ -24,6 +24,12 @@ function normalizeError(err) {
 
 async function parseResponse(res, fallbackError) {
   const data = await res.json().catch(() => ({}))
+  if (res.status === 401) {
+    setToken(null)
+    localStorage.removeItem('haggle_user')
+    window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+    throw new Error(data.error || 'Session expired. Please sign in again.')
+  }
   if (!res.ok) {
     throw new Error(data.error || fallbackError)
   }

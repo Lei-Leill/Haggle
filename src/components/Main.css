@@ -220,3 +220,164 @@
   font-size: 13px;
   color: var(--text-secondary);
 }
+
+/* Split layout for Negotiation */
+.main-content--split {
+  max-width: none;
+  padding: 24px 24px 32px;
+}
+
+.main-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  flex: 1;
+  min-height: 0;
+}
+
+.main-split-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.main-split-panel-header {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.main-split-panel-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 12px;
+  line-height: 1.4;
+}
+
+.main-split-panel--agent .main-messages {
+  flex: 1;
+  min-height: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.main-split-messages {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 120px;
+  max-height: 280px;
+  padding: 12px 0;
+}
+
+.main-split-msg {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.main-split-msg--seller {
+  background: var(--bg-tertiary);
+  border-left: 3px solid var(--text-secondary);
+}
+
+.main-split-msg--you {
+  background: rgba(171, 104, 255, 0.12);
+  border-left: 3px solid var(--accent);
+}
+
+.main-split-msg-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.main-split-msg-content {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.main-split-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.main-split-input {
+  flex: 1;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+}
+
+.main-split-input::placeholder {
+  color: var(--text-secondary);
+}
+
+.main-split-btn {
+  padding: 10px 16px;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.main-split-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.main-split-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.main-split-use-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.main-split-use-btn:hover {
+  background: rgba(171, 104, 255, 0.1);
+}
+
+.main-form--in-panel {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.main-form--in-panel .main-input-wrap {
+  display: flex;
+  gap: 8px;
+}
+
+.main-form--in-panel .main-input {
+  flex: 1;
+}

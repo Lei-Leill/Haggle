@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import './Main.css'
+
+const SELLER_STORAGE_KEY = (projectId) => `haggle_seller_thread_${projectId ?? 'new'}`
 
 const IconPlus = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -54,17 +56,46 @@ const MODE_COPY = {
   },
 }
 
-export default function Main({ messages, onSendMessage, isEmpty, sendLoading, activeMode, onModeChange, hasProject }) {
+export default function Main({ messages, onSendMessage, isEmpty, sendLoading, activeMode, onModeChange, hasProject, activeProjectId }) {
   const [input, setInput] = useState('')
+  const [sellerInput, setSellerInput] = useState('')
   const messagesEndRef = useRef(null)
+  const sellerEndRef = useRef(null)
+
+  const [sellerThread, setSellerThread] = useState(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      const stored = localStorage.getItem(SELLER_STORAGE_KEY(activeProjectId))
+      return stored ? JSON.parse(stored) : []
+    } catch {
+      return []
+    }
+  })
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(SELLER_STORAGE_KEY(activeProjectId))
+      setSellerThread(stored ? JSON.parse(stored) : [])
+    } catch {
+      setSellerThread([])
+    }
+  }, [activeProjectId])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SELLER_STORAGE_KEY(activeProjectId), JSON.stringify(sellerThread))
+    } catch {}
+  }, [sellerThread, activeProjectId])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
+  const scrollSellerToBottom = () => {
+    sellerEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
 
-  useEffect(() => {
-    scrollToBottom()
-  }, [messages])
+  useEffect(() => { scrollToBottom() }, [messages])
+  useEffect(() => { scrollSellerToBottom() }, [sellerThread])
 
   const handleSubmit = (e) => {
     e?.preventDefault()
@@ -73,9 +104,31 @@ export default function Main({ messages, onSendMessage, isEmpty, sendLoading, ac
     setInput('')
   }
 
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit(e)
+    }
+  }
+
+  const addSellerMessage = useCallback(() => {
+    if (!sellerInput.trim()) return
+    setSellerThread((prev) => [...prev, { role: 'seller', content: sellerInput.trim() }])
+    setSellerInput('')
+  }, [sellerInput])
+
+  const addYourReply = useCallback((text) => {
+    if (!text?.trim()) return
+    setSellerThread((prev) => [...prev, { role: 'you', content: text.trim() }])
+  }, [])
+
+  const lastAgentReply = messages.filter((m) => m.role === 'assistant').pop()?.content
+
+  const isNegotiationSplit = activeMode === 'negotiation' && !isEmpty
+
   return (
     <main className="main">
-      <div className="main-content">
+      <div className={`main-content ${isNegotiationSplit ? 'main-content--split' : ''}`}>
         <div className="main-modes">
           {Object.entries(MODE_COPY).map(([mode, copy]) => (
             <button
@@ -98,6 +151,78 @@ export default function Main({ messages, onSendMessage, isEmpty, sendLoading, ac
                 : 'Let us set up your new project. Tell me whether you are the buyer or seller, who the counterparty is, what you are negotiating, and your target outcome.'}
             </p>
           </div>
+        ) : isNegotiationSplit ? (
+          <div className="main-split">
+            <div className="main-split-panel main-split-panel--seller">
+              <div className="main-split-panel-header">Chat with seller</div>
+              <p className="main-split-panel-hint">Paste what the seller said. When the agent suggests a reply, add it here to track the conversation.</p>
+              <div className="main-split-messages">
+                {sellerThread.map((m, i) => (
+                  <div key={i} className={`main-split-msg main-split-msg--${m.role}`}>
+                    <span className="main-split-msg-label">{m.role === 'seller' ? 'Seller' : 'You'}</span>
+                    <div className="main-split-msg-content">{m.content}</div>
+                  </div>
+                ))}
+                <div ref={sellerEndRef} />
+              </div>
+              <div className="main-split-input-row">
+                <input
+                  type="text"
+                  className="main-split-input"
+                  placeholder="Paste what seller said..."
+                  value={sellerInput}
+                  onChange={(e) => setSellerInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSellerMessage())}
+                />
+                <button type="button" className="main-split-btn" onClick={addSellerMessage}>
+                  Add
+                </button>
+              </div>
+              {lastAgentReply && (
+                <button
+                  type="button"
+                  className="main-split-use-btn"
+                  onClick={() => addYourReply(lastAgentReply)}
+                >
+                  Add agent’s last reply as my reply
+                </button>
+              )}
+            </div>
+            <div className="main-split-panel main-split-panel--agent">
+              <div className="main-split-panel-header">Haggle AI advisor</div>
+              <p className="main-split-panel-hint">Paste what the seller said and get suggested replies.</p>
+              <div className="main-messages">
+                {messages.map((msg, i) => (
+                  <div key={msg.id ?? `m-${i}`} className={`main-message main-message--${msg.role}`}>
+                    <div className="main-message-inner">
+                      {msg.role === 'user' ? (
+                        <span className="main-message-avatar main-message-avatar--user">U</span>
+                      ) : (
+                        <span className="main-message-avatar main-message-avatar--assistant">H</span>
+                      )}
+                      <div className="main-message-text">{msg.content}</div>
+                    </div>
+                  </div>
+                ))}
+                <div ref={messagesEndRef} />
+              </div>
+              <form className="main-form main-form--in-panel" onSubmit={handleSubmit}>
+                <div className="main-input-wrap">
+                  <input
+                    type="text"
+                    className="main-input"
+                    placeholder={sendLoading ? 'Thinking…' : "Paste what seller said, e.g. \"Your quote is too high...\""}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    disabled={sendLoading}
+                  />
+                  <button type="submit" className="main-split-btn" disabled={sendLoading}>Send</button>
+                </div>
+                {sendLoading && <p className="main-thinking">Haggle AI is thinking…</p>}
+              </form>
+            </div>
+          </div>
         ) : (
           <div className="main-messages">
             {messages.map((msg, i) => (
@@ -116,15 +241,18 @@ export default function Main({ messages, onSendMessage, isEmpty, sendLoading, ac
           </div>
         )}
 
-        <div className="main-actions-float">
-          <button type="button" className="main-action-btn" aria-label="Compare">
-            <IconCompare />
-          </button>
-          <button type="button" className="main-action-btn" aria-label="Regenerate">
-            <IconRegenerate />
-          </button>
-        </div>
+        {!isNegotiationSplit && (
+          <div className="main-actions-float">
+            <button type="button" className="main-action-btn" aria-label="Compare">
+              <IconCompare />
+            </button>
+            <button type="button" className="main-action-btn" aria-label="Regenerate">
+              <IconRegenerate />
+            </button>
+          </div>
+        )}
 
+        {!isNegotiationSplit && (
         <form className="main-form" onSubmit={handleSubmit}>
           <div className="main-input-wrap">
             <button type="button" className="main-input-btn" aria-label="Attach">
@@ -136,7 +264,7 @@ export default function Main({ messages, onSendMessage, isEmpty, sendLoading, ac
               placeholder={sendLoading ? 'Thinking…' : MODE_COPY[activeMode].placeholder}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSubmit()}
+              onKeyDown={handleKeyDown}
               disabled={sendLoading}
             />
             <button type="button" className="main-input-btn" aria-label="Voice input" disabled={sendLoading}>
@@ -150,6 +278,7 @@ export default function Main({ messages, onSendMessage, isEmpty, sendLoading, ac
             <p className="main-thinking">Haggle AI is thinking…</p>
           )}
         </form>
+        )}
       </div>
     </main>
   )

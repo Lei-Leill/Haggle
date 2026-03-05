@@ -27,6 +27,16 @@ export function AuthProvider({ children }) {
     loadUser()
   }, [loadUser])
 
+  useEffect(() => {
+    const handler = () => {
+      setUser(null)
+      api.setToken(null)
+      localStorage.removeItem('haggle_user')
+    }
+    window.addEventListener('auth:unauthorized', handler)
+    return () => window.removeEventListener('auth:unauthorized', handler)
+  }, [])
+
   const login = useCallback(async (email, password) => {
     const { user: u, token } = await api.login({ email, password })
     api.setToken(token)

@@ -60,6 +60,9 @@ constraints, timeline, and desired outcome.
 Ask focused follow-up questions and provide clear next steps.`
 }
 
+// ----- Health (no auth) -----
+app.get('/api/health', (req, res) => res.json({ ok: true }))
+
 // ----- Auth -----
 app.post('/api/auth/register', async (req, res) => {
   try {
@@ -178,21 +181,17 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
     try {
       const model = llmModel || modelId || 'gpt-4o-mini'
       if (isTinker) {
-        // Tinker docs use completions API with prompt; chat template may not match our checkpoint
-        const sys = systemPromptForMode(mode)
-        const prompt = messagesForLlm.reduce((acc, m) => {
-          if (m.role === 'system') return acc + `System: ${m.content}\n\n`
-          if (m.role === 'user') return acc + `User: ${m.content}\n\n`
-          return acc + `Assistant: ${m.content}\n\n`
-        }, `System: ${sys}\n\n`)
-        const completion = await openai.completions.create({
+        // Tinker supports both /completions and /chat/completions - try chat for conversation
+        const completion = await openai.chat.completions.create({
           model,
-          prompt: prompt + 'Assistant:',
+          messages: [
+            { role: 'system', content: systemPromptForMode(mode) },
+            ...messagesForLlm.map((m) => ({ role: m.role, content: m.content })),
+          ],
           max_tokens: 512,
           temperature: 0.7,
-          top_p: 0.9,
         })
-        assistantContent = completion.choices[0]?.text?.trim() || 'No response generated.'
+        assistantContent = completion.choices[0]?.message?.content?.trim() || 'No response generated.'
       } else {
         const completion = await openai.chat.completions.create({
           model,
@@ -204,8 +203,10 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
         assistantContent = completion.choices[0]?.message?.content?.trim() || 'No response generated.'
       }
     } catch (err) {
+      const msg = err?.message || String(err)
+      const status = err?.status || err?.statusCode
       console.error('LLM provider error:', err)
-      assistantContent = 'Sorry, the AI service is temporarily unavailable. Please check your API key and try again.'
+      assistantContent = `Tinker API error${status ? ` (${status})` : ''}: ${msg}. Check server console for details.`
     }
   } else {
     assistantContent = 'Haggle AI demo: configure your LLM provider in server/.env (for Tinker, set TINKER_API_KEY and optionally TINKER_BASE_URL / TINKER_MODEL).'
