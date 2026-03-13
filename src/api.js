@@ -85,9 +85,9 @@ export async function createChat({ title = 'New project', category = 'project' }
   }
 }
 
-export async function getChat(id, mode = 'chat') {
+export async function getChat(id, mode = 'chat', includeContext = false) {
   try {
-    const query = `?mode=${encodeURIComponent(mode)}`
+    const query = `?mode=${encodeURIComponent(mode)}&includeContext=${includeContext ? 'true' : 'false'}`
     const res = await fetch(`${API_BASE}/api/chats/${id}${query}`, { headers: getHeaders() })
     return await parseResponse(res, 'Failed to load project')
   } catch (err) {
@@ -122,12 +122,12 @@ export async function deleteChat(id) {
   }
 }
 
-export async function sendMessage(chatId, content, model, mode = 'chat') {
+export async function sendMessage(chatId, content, model, mode = 'chat', images = []) {
   try {
     const res = await fetch(`${API_BASE}/api/chats/${chatId}/messages`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ content, model, mode }),
+      body: JSON.stringify({ content, model, mode, images }),
     })
     return await parseResponse(res, 'Failed to send message')
   } catch (err) {

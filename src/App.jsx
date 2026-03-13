@@ -40,8 +40,10 @@ function App() {
 
   const loadProjectMessages = useCallback(async (id, mode = activeMode) => {
     setChatLoading(true)
+    setMessages([])
     try {
-      const project = await api.getChat(id, mode)
+      const includeContext = mode === 'negotiation'
+      const project = await api.getChat(id, mode, includeContext)
       setMessages(project.messages || [])
     } catch (err) {
       console.error('Failed to load project', err)
@@ -77,9 +79,9 @@ function App() {
     loadProjectMessages(activeProjectId, activeMode)
   }, [activeProjectId, activeMode, loadProjectMessages])
 
-  const handleSendMessage = useCallback(async (text) => {
-    if (!text.trim()) return
-    const userMessage = { role: 'user', mode: activeMode, content: text }
+  const handleSendMessage = useCallback(async (text, images = []) => {
+    if (!text.trim() && images.length === 0) return
+    const userMessage = { role: 'user', mode: activeMode, content: text, images }
     setMessages((prev) => [...prev, userMessage])
     setSendLoading(true)
 
@@ -100,10 +102,10 @@ function App() {
     }
 
     try {
-      const result = await api.sendMessage(projectId, text, selectedModel, activeMode)
+      const result = await api.sendMessage(projectId, text, selectedModel, activeMode, images)
       setMessages((prev) => {
         const withoutLast = prev.slice(0, -1)
-        return [...withoutLast, result.userMessage, result.assistantMessage]
+        return [...withoutLast, { ...result.userMessage, images }, result.assistantMessage]
       })
       if (result.chatTitle) {
         setProjects((prev) =>
@@ -172,6 +174,7 @@ function App() {
           onSendMessage={handleSendMessage}
           isEmpty={messages.length === 0}
           sendLoading={sendLoading}
+          chatLoading={chatLoading}
           activeMode={activeMode}
           onModeChange={handleModeChange}
           hasProject={Boolean(activeProjectId)}
