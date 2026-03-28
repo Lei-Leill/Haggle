@@ -1,5 +1,6 @@
-// In dev, use same origin so Vite proxy can forward /api to the backend.
-const API_BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? '' : 'http://localhost:3001')
+// In dev with Vite, use empty string so proxy forwards to backend
+// In production, use VITE_API_URL environment variable or fallback to same origin
+const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : '')
 const SERVER_UNREACHABLE = "Can't reach the server. Start the backend: cd server && npm run dev"
 
 function getToken() {
