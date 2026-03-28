@@ -18,6 +18,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS chats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES chats(id) ON DELETE CASCADE,
     title TEXT NOT NULL DEFAULT 'New chat',
     category TEXT NOT NULL DEFAULT 'chat',
     created_at TEXT DEFAULT (datetime('now')),
@@ -46,5 +47,33 @@ if (!hasModeColumn) {
     CREATE INDEX IF NOT EXISTS idx_messages_chat_mode ON messages(chat_id, mode);
   `)
 }
+
+const chatColumns = db.prepare('PRAGMA table_info(chats)').all()
+const hasParentIdColumn = chatColumns.some((column) => column.name === 'parent_id')
+if (!hasParentIdColumn) {
+  db.exec(`
+    ALTER TABLE chats ADD COLUMN parent_id INTEGER REFERENCES chats(id) ON DELETE CASCADE;
+    CREATE INDEX IF NOT EXISTS idx_chats_parent ON chats(parent_id);
+  `)
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS project_metadata (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL UNIQUE REFERENCES chats(id) ON DELETE CASCADE,
+    item_listing TEXT,
+    listed_price TEXT,
+    target_price TEXT,
+    max_price TEXT,
+    ideal_extras TEXT,
+    urgency TEXT,
+    private_notes TEXT,
+    seller_type TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  
+  CREATE INDEX IF NOT EXISTS idx_project_metadata_chat ON project_metadata(chat_id);
+`)
 
 export default db

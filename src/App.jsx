@@ -56,12 +56,89 @@ function App() {
   const handleNewProject = useCallback(async () => {
     try {
       const project = await api.createChat({ title: 'New project', category: 'project' })
-      setProjects((prev) => [project, ...prev])
+      setProjects((prev) => [{ ...project, children: [] }, ...prev])
       setActiveProjectId(project.id)
       setActiveMode('chat')
       setMessages([])
     } catch (err) {
       console.error('Failed to create project', err)
+    }
+  }, [])
+
+  const handleDeleteProject = useCallback(async (projectId) => {
+    try {
+      await api.deleteChat(projectId)
+      setProjects((prev) => prev.filter((p) => p.id !== projectId))
+      if (activeProjectId === projectId) {
+        setActiveProjectId(null)
+        setMessages([])
+      }
+    } catch (err) {
+      console.error('Failed to delete project', err)
+      alert('Failed to delete project')
+    }
+  }, [activeProjectId])
+
+  const handleDeleteChat = useCallback(async (chatId) => {
+    try {
+      await api.deleteChat(chatId)
+      // Remove chat from the appropriate project
+      setProjects((prev) =>
+        prev.map((project) => ({
+          ...project,
+          children: (project.children || []).filter((chat) => chat.id !== chatId),
+        }))
+      )
+      if (activeProjectId === chatId) {
+        setActiveProjectId(null)
+        setMessages([])
+      }
+    } catch (err) {
+      console.error('Failed to delete chat', err)
+      alert('Failed to delete chat')
+    }
+  }, [activeProjectId])
+
+  const handleCreateChat = useCallback(async (projectId) => {
+    try {
+      const chat = await api.createChat({ title: 'New chat', category: 'chat', parent_id: projectId })
+      setProjects((prev) =>
+        prev.map((project) => {
+          if (project.id === projectId) {
+            return {
+              ...project,
+              children: [chat, ...(project.children || [])],
+            }
+          }
+          return project
+        })
+      )
+    } catch (err) {
+      console.error('Failed to create chat', err)
+      alert('Failed to create chat')
+    }
+  }, [])
+
+  const handleRename = useCallback(async (itemId, newTitle) => {
+    try {
+      await api.updateChatTitle(itemId, newTitle)
+      setProjects((prev) =>
+        prev.map((project) => {
+          if (project.id === itemId) {
+            return { ...project, title: newTitle }
+          }
+          // Check if it's a nested chat
+          return {
+            ...project,
+            children: (project.children || []).map((chat) =>
+              chat.id === itemId ? { ...chat, title: newTitle } : chat
+            ),
+          }
+        })
+      )
+    } catch (err) {
+      console.error('Failed to rename:', err)
+      throw err
     }
   }, [])
 
@@ -89,7 +166,7 @@ function App() {
     if (!projectId) {
       try {
         const project = await api.createChat({ title: 'New project', category: 'project' })
-        setProjects((prev) => [project, ...prev])
+        setProjects((prev) => [{ ...project, children: [] }, ...prev])
         setActiveProjectId(project.id)
         projectId = project.id
         setMessages([])
@@ -109,7 +186,18 @@ function App() {
       })
       if (result.chatTitle) {
         setProjects((prev) =>
-          prev.map((c) => (c.id === projectId ? { ...c, title: result.chatTitle } : c))
+          prev.map((project) => {
+            if (project.id === projectId) {
+              return { ...project, title: result.chatTitle }
+            }
+            // Check if it's a nested chat
+            return {
+              ...project,
+              children: (project.children || []).map((chat) =>
+                chat.id === projectId ? { ...chat, title: result.chatTitle } : chat
+              ),
+            }
+          })
         )
       }
     } catch (err) {
@@ -133,6 +221,16 @@ function App() {
     setActiveMode('chat')
     setMessages([])
   }, [user])
+
+  // Determine if currently viewing a project (not a chat within a project)
+  const isViewingProject = useCallback(() => {
+    if (!activeProjectId) return false
+    const project = projects.find((p) => p.id === activeProjectId)
+    if (project) return true // It's a top-level project
+    // Check if it's a chat within a project
+    const chat = projects.flatMap((p) => p.children || []).find((c) => c.id === activeProjectId)
+    return false // It's a chat, not a project
+  }, [activeProjectId, projects])
 
   if (loading) {
     return (
@@ -168,6 +266,10 @@ function App() {
           onSelectProject={handleSelectProject}
           chatsLoading={chatLoading}
           user={user}
+          onDeleteProject={handleDeleteProject}
+          onDeleteChat={handleDeleteChat}
+          onCreateChat={handleCreateChat}
+          onRename={handleRename}
         />
         <Main
           messages={messages}
@@ -179,6 +281,7 @@ function App() {
           onModeChange={handleModeChange}
           hasProject={Boolean(activeProjectId)}
           activeProjectId={activeProjectId}
+          isViewingProject={isViewingProject()}
         />
       </div>
     </div>

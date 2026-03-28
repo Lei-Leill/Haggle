@@ -72,14 +72,24 @@ export async function getChats() {
   }
 }
 
-export async function createChat({ title = 'New project', category = 'project' } = {}) {
+export async function createChat({ title = 'New project', category = 'project', parent_id = null } = {}) {
   try {
     const res = await fetch(`${API_BASE}/api/chats`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ title, category }),
+      body: JSON.stringify({ title, category, parent_id: parent_id || null }),
     })
     return await parseResponse(res, 'Failed to create project')
+  } catch (err) {
+    throw normalizeError(err)
+  }
+}
+
+export async function getChatChildren(id) {
+  try {
+    const res = await fetch(`${API_BASE}/api/chats/${id}/children`, { headers: getHeaders() })
+    const data = await parseResponse(res, 'Failed to load chats')
+    return data.children || []
   } catch (err) {
     throw normalizeError(err)
   }
@@ -130,6 +140,29 @@ export async function sendMessage(chatId, content, model, mode = 'chat', images 
       body: JSON.stringify({ content, model, mode, images }),
     })
     return await parseResponse(res, 'Failed to send message')
+  } catch (err) {
+    throw normalizeError(err)
+  }
+}
+
+export async function saveProjectMetadata(chatId, metadata) {
+  try {
+    const res = await fetch(`${API_BASE}/api/chats/${chatId}/metadata`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(metadata),
+    })
+    return await parseResponse(res, 'Failed to save project info')
+  } catch (err) {
+    throw normalizeError(err)
+  }
+}
+
+export async function getProjectMetadata(chatId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/chats/${chatId}/metadata`, { headers: getHeaders() })
+    const data = await parseResponse(res, 'Failed to load project info')
+    return data
   } catch (err) {
     throw normalizeError(err)
   }

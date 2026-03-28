@@ -159,27 +159,49 @@ app.post('/api/auth/login', async (req, res) => {
 // ----- Chats (protected) -----
 app.get('/api/chats', authMiddleware, (req, res) => {
   const chats = db.prepare(
-    'SELECT id, title, category, created_at, updated_at FROM chats WHERE user_id = ? ORDER BY updated_at DESC'
+    'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE user_id = ? AND parent_id IS NULL ORDER BY updated_at DESC'
   ).all(req.userId)
-  res.json({ chats })
+  
+  // Fetch children for each project
+  const projectsWithChildren = chats.map(project => {
+    const children = db.prepare(
+      'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE parent_id = ? ORDER BY updated_at DESC'
+    ).all(project.id)
+    return { ...project, children }
+  })
+  
+  res.json({ chats: projectsWithChildren })
 })
 
 app.post('/api/chats', authMiddleware, (req, res) => {
-  const { title = 'New project', category = 'project' } = req.body
+  const { title = 'New project', category = 'project', parent_id = null } = req.body
   const result = db.prepare(
-    'INSERT INTO chats (user_id, title, category) VALUES (?, ?, ?)'
-  ).run(req.userId, title, category)
+    'INSERT INTO chats (user_id, title, category, parent_id) VALUES (?, ?, ?, ?)'
+  ).run(req.userId, title, category, parent_id || null)
   const chat = db.prepare(
-    'SELECT id, title, category, created_at, updated_at FROM chats WHERE id = ?'
+    'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE id = ?'
   ).get(result.lastInsertRowid)
   res.status(201).json(chat)
+})
+
+app.get('/api/chats/:id/children', authMiddleware, (req, res) => {
+  const project = db.prepare('SELECT id, user_id FROM chats WHERE id = ?').get(req.params.id)
+  if (!project || project.user_id !== req.userId) {
+    return res.status(404).json({ error: 'Project not found' })
+  }
+  
+  const children = db.prepare(
+    'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE parent_id = ? ORDER BY updated_at DESC'
+  ).all(req.params.id)
+  
+  res.json({ children })
 })
 
 app.get('/api/chats/:id', authMiddleware, (req, res) => {
   const mode = normalizeMode(req.query.mode)
   const includeContext = req.query.includeContext === 'true'
   const chat = db.prepare(
-    'SELECT id, title, category, created_at, updated_at FROM chats WHERE id = ? AND user_id = ?'
+    'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE id = ? AND user_id = ?'
   ).get(req.params.id, req.userId)
   if (!chat) return res.status(404).json({ error: 'Chat not found' })
 
@@ -204,7 +226,7 @@ app.patch('/api/chats/:id', authMiddleware, (req, res) => {
   if (title !== undefined) {
     db.prepare("UPDATE chats SET title = ?, updated_at = datetime('now') WHERE id = ?").run(title, req.params.id)
   }
-  const chat = db.prepare('SELECT id, title, category, created_at, updated_at FROM chats WHERE id = ?').get(req.params.id)
+  const chat = db.prepare('SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE id = ?').get(req.params.id)
   res.json(chat)
 })
 
@@ -212,6 +234,55 @@ app.delete('/api/chats/:id', authMiddleware, (req, res) => {
   const result = db.prepare('DELETE FROM chats WHERE id = ? AND user_id = ?').run(req.params.id, req.userId)
   if (result.changes === 0) return res.status(404).json({ error: 'Chat not found' })
   res.status(204).send()
+})
+
+// ----- Project Metadata / Survey (protected) -----
+app.post('/api/chats/:id/metadata', authMiddleware, (req, res) => {
+  const chatId = req.params.id
+  const { item_listing, listed_price, target_price, max_price, ideal_extras, urgency, private_notes, seller_type } = req.body
+  
+  // Verify chat belongs to user
+  const chat = db.prepare('SELECT id, user_id FROM chats WHERE id = ?').get(chatId)
+  if (!chat || chat.user_id !== req.userId) {
+    return res.status(404).json({ error: 'Chat not found' })
+  }
+  
+  try {
+    db.prepare(`
+      INSERT INTO project_metadata (chat_id, item_listing, listed_price, target_price, max_price, ideal_extras, urgency, private_notes, seller_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(chatId, item_listing || null, listed_price || null, target_price || null, max_price || null, ideal_extras || null, urgency || null, private_notes || null, seller_type || null)
+    
+    const metadata = db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
+    res.status(201).json(metadata)
+  } catch (err) {
+    if (err.message.includes('UNIQUE')) {
+      // Update if exists
+      db.prepare(`
+        UPDATE project_metadata 
+        SET item_listing = ?, listed_price = ?, target_price = ?, max_price = ?, ideal_extras = ?, urgency = ?, private_notes = ?, seller_type = ?, updated_at = datetime('now')
+        WHERE chat_id = ?
+      `).run(item_listing || null, listed_price || null, target_price || null, max_price || null, ideal_extras || null, urgency || null, private_notes || null, seller_type || null, chatId)
+      
+      const metadata = db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
+      res.json(metadata)
+    } else {
+      throw err
+    }
+  }
+})
+
+app.get('/api/chats/:id/metadata', authMiddleware, (req, res) => {
+  const chatId = req.params.id
+  
+  // Verify chat belongs to user
+  const chat = db.prepare('SELECT id, user_id FROM chats WHERE id = ?').get(chatId)
+  if (!chat || chat.user_id !== req.userId) {
+    return res.status(404).json({ error: 'Chat not found' })
+  }
+  
+  const metadata = db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
+  res.json(metadata || null)
 })
 
 // ----- Send message + LLM (protected) -----
@@ -266,11 +337,21 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
   const isTinker = llmBaseUrl && llmBaseUrl.includes('tinker')
 
   let assistantContent
+  let imageFallbackUsed = false
   if (openai) {
     try {
       const model = llmModel || modelId || 'gpt-4o-mini'
       if (isTinker) {
-        // Tinker supports both /completions and /chat/completions - try chat for conversation
+        // Debug: log request structure for vision requests
+        if (hasImages) {
+          console.log('Sending vision request to Tinker with structure:', {
+            model,
+            messageCount: messagesForLlm.length,
+            firstMessageContentType: typeof messagesForLlm[0]?.content,
+            hasImageUrls: Array.isArray(messagesForLlm[0]?.content) ? 'yes' : 'no',
+          })
+        }
+        
         const completion = await openai.chat.completions.create({
           model,
           messages: [
@@ -297,16 +378,47 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
       const status = err?.status || err?.statusCode
       console.error('LLM provider error:', err)
 
-      const activeModel = llmModel || modelId || 'unknown-model'
-      if (status === 422 && hasImages) {
-        assistantContent = `The current model (${activeModel}) or provider endpoint rejected image input (HTTP 422). This usually means the model is text-only or the provider expects a different image format. Try switching to a vision-capable model, or send text only.`
+      // If 422 with images, retry without images (Tinker may not support data: URLs)
+      if (status === 422 && hasImages && !imageFallbackUsed) {
+        console.log('⚠️  Retrying without images - Tinker may not support base64 data URLs')
+        imageFallbackUsed = true
+        try {
+          const model = llmModel || modelId || 'gpt-4o-mini'
+          const messagesWithoutImages = [
+            ...historyForLlm.map((m) => ({ role: m.role, content: m.content })),
+            { 
+              role: 'user', 
+              content: textContent || '[Image received but model does not support vision]' 
+            },
+          ]
+          
+          const completion = await openai.chat.completions.create({
+            model,
+            messages: [
+              { role: 'system', content: systemPromptForMode(mode) },
+              ...messagesWithoutImages,
+            ],
+            max_tokens: 1400,
+            temperature: 0.7,
+          })
+          assistantContent = completion.choices[0]?.message?.content?.trim() || 'No response generated.'
+        } catch (retryErr) {
+          const retryMsg = extractProviderErrorMessage(retryErr)
+          const activeModel = llmModel || modelId || 'unknown-model'
+          assistantContent = `⚠️ Vision not supported: Your image couldn't be processed. The model (${activeModel}) may not support base64 images via this provider. Error: ${retryMsg}`
+        }
       } else {
-        assistantContent = `Tinker API error${status ? ` (${status})` : ''}: ${msg}. Check server console for details.`
+        const activeModel = llmModel || modelId || 'unknown-model'
+        if (status === 422 && hasImages) {
+          assistantContent = `⚠️ Vision error: The model (${activeModel}) rejected image input. Possible causes:\n• Model doesn't support data: URLs (embedded base64 images)\n• Tinker API requires publicly accessible image URLs\n• Image format or encoding issue\n\nTry sending text only or check model documentation.`
+        } else {
+          assistantContent = `Tinker API error${status ? ` (${status})` : ''}: ${msg}. Check server console for details.`
+        }
       }
 
       console.error('LLM request summary:', {
         status,
-        model: activeModel,
+        model: llmModel || modelId || 'unknown-model',
         hasImages,
         imageCount: sanitizedImages.length,
         textLength: textContent.length,

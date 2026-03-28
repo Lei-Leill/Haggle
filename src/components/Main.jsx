@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import ProjectSurvey from './ProjectSurvey'
 import './Main.css'
 
 const SELLER_STORAGE_KEY = (projectId) => `haggle_seller_thread_${projectId ?? 'new'}`
@@ -123,9 +124,11 @@ function MessageContent({ message }) {
   )
 }
 
-export default function Main({ messages, onSendMessage, isEmpty, sendLoading, activeMode, onModeChange, hasProject, activeProjectId, chatLoading }) {
+export default function Main({ messages, onSendMessage, isEmpty, sendLoading, activeMode, onModeChange, hasProject, activeProjectId, chatLoading, isViewingProject }) {
   const [input, setInput] = useState('')
   const [sellerInput, setSellerInput] = useState('')
+  const [showSurvey, setShowSurvey] = useState(false)
+  const [surveyActiveTab, setSurveyActiveTab] = useState('sources')
   const messagesEndRef = useRef(null)
   const sellerEndRef = useRef(null)
   const inputRef = useRef(null)
@@ -167,6 +170,15 @@ export default function Main({ messages, onSendMessage, isEmpty, sendLoading, ac
 
   useEffect(() => { scrollToBottom() }, [messages])
   useEffect(() => { scrollSellerToBottom() }, [sellerThread])
+
+  useEffect(() => {
+    // Show survey for projects when they first open and are empty
+    if (hasProject && isEmpty && !chatLoading) {
+      setShowSurvey(true)
+    } else {
+      setShowSurvey(false)
+    }
+  }, [hasProject, isEmpty, chatLoading])
 
   const autoResizeTextarea = (node) => {
     if (!node) return
@@ -266,6 +278,7 @@ export default function Main({ messages, onSendMessage, isEmpty, sendLoading, ac
   }, [])
 
   const isNegotiationSplit = activeMode === 'negotiation' && hasProject
+  const isSurveySplit = showSurvey && !isNegotiationSplit && isViewingProject
 
   return (
     <main className="main">
@@ -283,7 +296,7 @@ export default function Main({ messages, onSendMessage, isEmpty, sendLoading, ac
           ))}
         </div>
 
-        {isEmpty && !isNegotiationSplit && !chatLoading ? (
+        {isEmpty && !isNegotiationSplit && !isSurveySplit && !chatLoading ? (
           <div className="main-empty">
             <h1 className="main-greeting">Where shall we start?</h1>
             <p className="main-sub">
@@ -292,6 +305,13 @@ export default function Main({ messages, onSendMessage, isEmpty, sendLoading, ac
                 : 'Let us set up your new project. Tell me whether you are the buyer or seller, who the counterparty is, what you are negotiating, and your target outcome.'}
             </p>
           </div>
+        ) : isSurveySplit ? (
+          <ProjectSurvey 
+            projectId={activeProjectId} 
+            activeTab={surveyActiveTab}
+            onTabChange={setSurveyActiveTab}
+            onSurveyComplete={() => setShowSurvey(false)}
+          />
         ) : isNegotiationSplit ? (
           <div className="main-split">
             <div className="main-split-panel main-split-panel--seller">
