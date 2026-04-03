@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
+import rateLimit from 'express-rate-limit'
 import bcrypt from 'bcryptjs'
 import db from './db.js'
 import { signToken, authMiddleware } from './auth.js'
@@ -9,8 +10,38 @@ import OpenAI from 'openai'
 const app = express()
 const PORT = process.env.PORT || 3001
 
-app.use(cors({ origin: true, credentials: true }))
+// ===== Startup Validation =====
+const requiredEnvVars = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'JWT_SECRET']
+const missingEnvVars = requiredEnvVars.filter(v => !process.env[v])
+if (missingEnvVars.length > 0) {
+  throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`)
+}
+
+// ===== CORS Configuration =====
+const corsOrigins = [
+  'http://localhost:5173', // Local development
+  'http://localhost:3001', // Local backend
+]
+// In production, also allow the Vercel frontend domain from env var
+if (process.env.VITE_API_URL) {
+  const frontendUrl = process.env.VITE_API_URL.replace('/api', '').replace(/\/$/, '')
+  corsOrigins.push(frontendUrl)
+}
+
+app.use(cors({ 
+  origin: corsOrigins,
+  credentials: true 
+}))
 app.use(express.json({ limit: '20mb' }))
+
+// ===== Rate Limiting =====
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each IP to 10 requests per windowMs for auth
+  message: 'Too many authentication attempts, please try again later',
+  standardHeaders: true, // Return rate limit info in RateLimit-* headers
+  legacyHeaders: false, // Disable X-RateLimit-* headers
+})
 
 const llmApiKey =
   process.env.LLM_API_KEY ||
@@ -108,10 +139,23 @@ function extractProviderErrorMessage(err) {
 }
 
 // ----- Health (no auth) -----
-app.get('/api/health', (req, res) => res.json({ ok: true }))
+app.get('/api/health', async (req, res) => {
+  try {
+    // Test database connectivity
+    await db.prepare('SELECT 1').get()
+    res.json({ ok: true, database: 'connected' })
+  } catch (err) {
+    console.error('Health check - Database unavailable:', err.message)
+    res.status(503).json({ 
+      ok: false, 
+      database: 'disconnected',
+      error: 'Database connection failed'
+    })
+  }
+})
 
 // ----- Auth -----
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
     const { email, password, name } = req.body
     if (!email?.trim() || !password || !name?.trim()) {
@@ -134,7 +178,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
 })
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body
     if (!email?.trim() || !password) {
