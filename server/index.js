@@ -22,10 +22,13 @@ const corsOrigins = [
   'http://localhost:5173', // Local development
   'http://localhost:3001', // Local backend
 ]
-// In production, also allow the Vercel frontend domain from env var
-if (process.env.VITE_API_URL) {
-  const frontendUrl = process.env.VITE_API_URL.replace('/api', '').replace(/\/$/, '')
-  corsOrigins.push(frontendUrl)
+// In production, add frontend domain from FRONTEND_URL env var
+if (process.env.FRONTEND_URL) {
+  corsOrigins.push(process.env.FRONTEND_URL)
+}
+// Also allow if running in Vercel (trust all HTTPS origins in Vercel environment)
+if (process.env.VERCEL === '1') {
+  corsOrigins.push(/vercel\.app$/) // Allows all *.vercel.app domains
 }
 
 app.use(cors({ 
