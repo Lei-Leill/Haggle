@@ -18,22 +18,22 @@ if (missingEnvVars.length > 0) {
 }
 
 // ===== CORS Configuration =====
-const corsOrigins = [
-  'http://localhost:5173', // Local development
-  'http://localhost:3001', // Local backend
-]
-// In production, add frontend domain from FRONTEND_URL env var
-if (process.env.FRONTEND_URL) {
-  corsOrigins.push(process.env.FRONTEND_URL)
-}
-// Also allow if running in Vercel (trust all HTTPS origins in Vercel environment)
-if (process.env.VERCEL === '1') {
-  corsOrigins.push(/vercel\.app$/) // Allows all *.vercel.app domains
-}
-
 app.use(cors({ 
-  origin: corsOrigins,
-  credentials: true 
+  origin: (origin, callback) => {
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'http://localhost:3001',
+      process.env.FRONTEND_URL,
+    ].filter(Boolean)
+    
+    if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+      callback(null, true)
+    } else {
+      callback(new Error('CORS not allowed for: ' + origin))
+    }
+  },
+  credentials: true,
+  optionsSuccessStatus: 200
 }))
 app.use(express.json({ limit: '20mb' }))
 
