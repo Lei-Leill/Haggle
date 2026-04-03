@@ -144,8 +144,8 @@ function extractProviderErrorMessage(err) {
 // ----- Health (no auth) -----
 app.get('/api/health', async (req, res) => {
   try {
-    // Test database connectivity
-    await db.prepare('SELECT 1').get()
+    // Test database connectivity by querying the users table
+    await db.prepare('SELECT id FROM users LIMIT 1').get()
     res.json({ ok: true, database: 'connected' })
   } catch (err) {
     console.error('Health check - Database unavailable:', err.message)
