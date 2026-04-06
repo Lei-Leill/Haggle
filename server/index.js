@@ -205,238 +205,279 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
 })
 
 // ----- Chats (protected) -----
-app.get('/api/chats', authMiddleware, (req, res) => {
-  const chats = db.prepare(
-    'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE user_id = ? AND parent_id IS NULL ORDER BY updated_at DESC'
-  ).all(req.userId)
-  
-  // Fetch children for each project
-  const projectsWithChildren = chats.map(project => {
-    const children = db.prepare(
+app.get('/api/chats', authMiddleware, async (req, res) => {
+  try {
+    const chats = await db.prepare(
+      'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE user_id = ? AND parent_id IS NULL ORDER BY updated_at DESC'
+    ).all(req.userId)
+    
+    // Fetch children for each project
+    const projectsWithChildren = await Promise.all(chats.map(async project => {
+      const children = await db.prepare(
+        'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE parent_id = ? ORDER BY updated_at DESC'
+      ).all(project.id)
+      return { ...project, children }
+    }))
+    
+    res.json({ chats: projectsWithChildren })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to load projects' })
+  }
+})
+
+app.post('/api/chats', authMiddleware, async (req, res) => {
+  try {
+    const { title = 'New project', category = 'project', parent_id = null } = req.body
+    const result = await db.prepare(
+      'INSERT INTO chats (user_id, title, category, parent_id) VALUES (?, ?, ?, ?)'
+    ).run(req.userId, title, category, parent_id || null)
+    const chat = await db.prepare(
+      'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE id = ?'
+    ).get(result.lastInsertRowid)
+    res.status(201).json(chat)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to create project' })
+  }
+})
+
+app.get('/api/chats/:id/children', authMiddleware, async (req, res) => {
+  try {
+    const project = await db.prepare('SELECT id, user_id FROM chats WHERE id = ?').get(req.params.id)
+    if (!project || project.user_id !== req.userId) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+    
+    const children = await db.prepare(
       'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE parent_id = ? ORDER BY updated_at DESC'
-    ).all(project.id)
-    return { ...project, children }
-  })
-  
-  res.json({ chats: projectsWithChildren })
-})
-
-app.post('/api/chats', authMiddleware, (req, res) => {
-  const { title = 'New project', category = 'project', parent_id = null } = req.body
-  const result = db.prepare(
-    'INSERT INTO chats (user_id, title, category, parent_id) VALUES (?, ?, ?, ?)'
-  ).run(req.userId, title, category, parent_id || null)
-  const chat = db.prepare(
-    'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE id = ?'
-  ).get(result.lastInsertRowid)
-  res.status(201).json(chat)
-})
-
-app.get('/api/chats/:id/children', authMiddleware, (req, res) => {
-  const project = db.prepare('SELECT id, user_id FROM chats WHERE id = ?').get(req.params.id)
-  if (!project || project.user_id !== req.userId) {
-    return res.status(404).json({ error: 'Project not found' })
+    ).all(req.params.id)
+    
+    res.json({ children })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to load children' })
   }
-  
-  const children = db.prepare(
-    'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE parent_id = ? ORDER BY updated_at DESC'
-  ).all(req.params.id)
-  
-  res.json({ children })
 })
 
-app.get('/api/chats/:id', authMiddleware, (req, res) => {
-  const mode = normalizeMode(req.query.mode)
-  const includeContext = req.query.includeContext === 'true'
-  const chat = db.prepare(
-    'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE id = ? AND user_id = ?'
-  ).get(req.params.id, req.userId)
-  if (!chat) return res.status(404).json({ error: 'Chat not found' })
+app.get('/api/chats/:id', authMiddleware, async (req, res) => {
+  try {
+    const mode = normalizeMode(req.query.mode)
+    const includeContext = req.query.includeContext === 'true'
+    const chat = await db.prepare(
+      'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE id = ? AND user_id = ?'
+    ).get(req.params.id, req.userId)
+    if (!chat) return res.status(404).json({ error: 'Chat not found' })
 
-  const messages = includeContext && mode === 'negotiation'
-    ? db.prepare(
-      `SELECT id, role, mode, content, created_at
-       FROM messages
-       WHERE chat_id = ? AND mode IN ('chat', 'negotiation')
-       ORDER BY created_at ASC, id ASC`
-    ).all(chat.id)
-    : db.prepare(
-      'SELECT id, role, mode, content, created_at FROM messages WHERE chat_id = ? AND mode = ? ORDER BY created_at ASC, id ASC'
-    ).all(chat.id, mode)
+    const messages = includeContext && mode === 'negotiation'
+      ? await db.prepare(
+        `SELECT id, role, mode, content, created_at
+         FROM messages
+         WHERE chat_id = ? AND mode IN ('chat', 'negotiation')
+         ORDER BY created_at ASC, id ASC`
+      ).all(chat.id)
+      : await db.prepare(
+        'SELECT id, role, mode, content, created_at FROM messages WHERE chat_id = ? AND mode = ? ORDER BY created_at ASC, id ASC'
+      ).all(chat.id, mode)
 
-  res.json({ ...chat, mode, messages })
-})
-
-app.patch('/api/chats/:id', authMiddleware, (req, res) => {
-  const { title } = req.body
-  const existing = db.prepare('SELECT id FROM chats WHERE id = ? AND user_id = ?').get(req.params.id, req.userId)
-  if (!existing) return res.status(404).json({ error: 'Chat not found' })
-  if (title !== undefined) {
-    db.prepare("UPDATE chats SET title = ?, updated_at = datetime('now') WHERE id = ?").run(title, req.params.id)
+    res.json({ ...chat, mode, messages })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to load chat' })
   }
-  const chat = db.prepare('SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE id = ?').get(req.params.id)
-  res.json(chat)
 })
 
-app.delete('/api/chats/:id', authMiddleware, (req, res) => {
-  const result = db.prepare('DELETE FROM chats WHERE id = ? AND user_id = ?').run(req.params.id, req.userId)
-  if (result.changes === 0) return res.status(404).json({ error: 'Chat not found' })
-  res.status(204).send()
+app.patch('/api/chats/:id', authMiddleware, async (req, res) => {
+  try {
+    const { title } = req.body
+    const existing = await db.prepare('SELECT id FROM chats WHERE id = ? AND user_id = ?').get(req.params.id, req.userId)
+    if (!existing) return res.status(404).json({ error: 'Chat not found' })
+    if (title !== undefined) {
+      await db.prepare("UPDATE chats SET title = ?, updated_at = datetime('now') WHERE id = ?").run(title, req.params.id)
+    }
+    const chat = await db.prepare('SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE id = ?').get(req.params.id)
+    res.json(chat)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to update chat' })
+  }
+})
+
+app.delete('/api/chats/:id', authMiddleware, async (req, res) => {
+  try {
+    const result = await db.prepare('DELETE FROM chats WHERE id = ? AND user_id = ?').run(req.params.id, req.userId)
+    if (result.changes === 0) return res.status(404).json({ error: 'Chat not found' })
+    res.status(204).send()
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to delete chat' })
+  }
 })
 
 // ----- Project Metadata / Survey (protected) -----
-app.post('/api/chats/:id/metadata', authMiddleware, (req, res) => {
-  const chatId = req.params.id
-  const { item_listing, listed_price, target_price, max_price, ideal_extras, urgency, private_notes, seller_type } = req.body
-  
-  // Verify chat belongs to user
-  const chat = db.prepare('SELECT id, user_id FROM chats WHERE id = ?').get(chatId)
-  if (!chat || chat.user_id !== req.userId) {
-    return res.status(404).json({ error: 'Chat not found' })
-  }
-  
+app.post('/api/chats/:id/metadata', authMiddleware, async (req, res) => {
   try {
-    db.prepare(`
-      INSERT INTO project_metadata (chat_id, item_listing, listed_price, target_price, max_price, ideal_extras, urgency, private_notes, seller_type)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(chatId, item_listing || null, listed_price || null, target_price || null, max_price || null, ideal_extras || null, urgency || null, private_notes || null, seller_type || null)
+    const chatId = req.params.id
+    const { item_listing, listed_price, target_price, max_price, ideal_extras, urgency, private_notes, seller_type } = req.body
     
-    const metadata = db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
-    res.status(201).json(metadata)
-  } catch (err) {
-    if (err.message.includes('UNIQUE')) {
-      // Update if exists
-      db.prepare(`
-        UPDATE project_metadata 
-        SET item_listing = ?, listed_price = ?, target_price = ?, max_price = ?, ideal_extras = ?, urgency = ?, private_notes = ?, seller_type = ?, updated_at = datetime('now')
-        WHERE chat_id = ?
-      `).run(item_listing || null, listed_price || null, target_price || null, max_price || null, ideal_extras || null, urgency || null, private_notes || null, seller_type || null, chatId)
-      
-      const metadata = db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
-      res.json(metadata)
-    } else {
-      throw err
+    // Verify chat belongs to user
+    const chat = await db.prepare('SELECT id, user_id FROM chats WHERE id = ?').get(chatId)
+    if (!chat || chat.user_id !== req.userId) {
+      return res.status(404).json({ error: 'Chat not found' })
     }
+    
+    try {
+      await db.prepare(`
+        INSERT INTO project_metadata (chat_id, item_listing, listed_price, target_price, max_price, ideal_extras, urgency, private_notes, seller_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(chatId, item_listing || null, listed_price || null, target_price || null, max_price || null, ideal_extras || null, urgency || null, private_notes || null, seller_type || null)
+      
+      const metadata = await db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
+      res.status(201).json(metadata)
+    } catch (err) {
+      if (err.message.includes('UNIQUE')) {
+        // Update if exists
+        await db.prepare(`
+          UPDATE project_metadata 
+          SET item_listing = ?, listed_price = ?, target_price = ?, max_price = ?, ideal_extras = ?, urgency = ?, private_notes = ?, seller_type = ?, updated_at = datetime('now')
+          WHERE chat_id = ?
+        `).run(item_listing || null, listed_price || null, target_price || null, max_price || null, ideal_extras || null, urgency || null, private_notes || null, seller_type || null, chatId)
+        
+        const metadata = await db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
+        res.json(metadata)
+      } else {
+        throw err
+      }
+    }
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to save metadata' })
   }
 })
 
-app.get('/api/chats/:id/metadata', authMiddleware, (req, res) => {
-  const chatId = req.params.id
-  
-  // Verify chat belongs to user
-  const chat = db.prepare('SELECT id, user_id FROM chats WHERE id = ?').get(chatId)
-  if (!chat || chat.user_id !== req.userId) {
-    return res.status(404).json({ error: 'Chat not found' })
+app.get('/api/chats/:id/metadata', authMiddleware, async (req, res) => {
+  try {
+    const chatId = req.params.id
+    
+    // Verify chat belongs to user
+    const chat = await db.prepare('SELECT id, user_id FROM chats WHERE id = ?').get(chatId)
+    if (!chat || chat.user_id !== req.userId) {
+      return res.status(404).json({ error: 'Chat not found' })
+    }
+    
+    const metadata = await db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
+    res.json(metadata || null)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to load metadata' })
   }
-  
-  const metadata = db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
-  res.json(metadata || null)
 })
 
 // ----- Send message + LLM (protected) -----
 app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
-  const chatId = req.params.id
-  const { content, model: modelId, mode: requestedMode, images } = req.body
-  const mode = normalizeMode(requestedMode)
+  try {
+    const chatId = req.params.id
+    const { content, model: modelId, mode: requestedMode, images } = req.body
+    const mode = normalizeMode(requestedMode)
 
-  // Validate and sanitize images
-  const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
-  const sanitizedImages = []
-  if (Array.isArray(images)) {
-    for (const img of images) {
-      if (typeof img !== 'string') continue
-      const match = img.match(/^data:(image\/[a-z+]+);base64,/)
-      if (!match || !ALLOWED_TYPES.has(match[1])) continue
-      if (img.length > 5_000_000) continue // ~3.75MB binary limit
-      sanitizedImages.push(img)
-      if (sanitizedImages.length >= 4) break
-    }
-  }
-  const hasImages = sanitizedImages.length > 0
-
-  if (!content?.trim() && !hasImages) {
-    return res.status(400).json({ error: 'Message content or image is required' })
-  }
-  const chat = db.prepare('SELECT id, title FROM chats WHERE id = ? AND user_id = ?').get(chatId, req.userId)
-  if (!chat) return res.status(404).json({ error: 'Chat not found' })
-
-  const textContent = content?.trim() || ''
-  const userInsert = db
-    .prepare('INSERT INTO messages (chat_id, role, mode, content) VALUES (?, ?, ?, ?)')
-    .run(chatId, 'user', mode, textContent)
-
-  // Fetch history excluding the just-inserted message, then append current turn
-  const historyForLlm = db.prepare(
-    'SELECT role, content FROM messages WHERE chat_id = ? AND mode = ? AND id != ? ORDER BY created_at ASC'
-  ).all(chatId, mode, userInsert.lastInsertRowid)
-
-  const currentUserContent = hasImages
-    ? [
-        { type: 'text', text: textContent || 'Please analyze the attached image.' },
-        ...sanitizedImages.map((url) => ({ type: 'image_url', image_url: { url } })),
-      ]
-    : textContent
-
-  const messagesForLlm = [
-    ...historyForLlm.map((m) => ({ role: m.role, content: m.content })),
-    { role: 'user', content: currentUserContent },
-  ]
-
-  const isTinker = llmBaseUrl && llmBaseUrl.includes('tinker')
-
-  let assistantContent
-  let imageFallbackUsed = false
-  if (openai) {
-    try {
-      const model = llmModel || modelId || 'gpt-4o-mini'
-      if (isTinker) {
-        // Debug: log request structure for vision requests
-        if (hasImages) {
-          console.log('Sending vision request to Tinker with structure:', {
-            model,
-            messageCount: messagesForLlm.length,
-            firstMessageContentType: typeof messagesForLlm[0]?.content,
-            hasImageUrls: Array.isArray(messagesForLlm[0]?.content) ? 'yes' : 'no',
-          })
-        }
-        
-        const completion = await openai.chat.completions.create({
-          model,
-          messages: [
-            { role: 'system', content: systemPromptForMode(mode) },
-            ...messagesForLlm.map((m) => ({ role: m.role, content: m.content })),
-          ],
-          max_tokens: 1400,
-          temperature: 0.7,
-        })
-        assistantContent = completion.choices[0]?.message?.content?.trim() || 'No response generated.'
-      } else {
-        const completion = await openai.chat.completions.create({
-          model,
-          messages: [
-            { role: 'system', content: systemPromptForMode(mode) },
-            ...messagesForLlm.map((m) => ({ role: m.role, content: m.content })),
-          ],
-          max_tokens: 1400,
-        })
-        assistantContent = completion.choices[0]?.message?.content?.trim() || 'No response generated.'
+    // Validate and sanitize images
+    const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+    const sanitizedImages = []
+    if (Array.isArray(images)) {
+      for (const img of images) {
+        if (typeof img !== 'string') continue
+        const match = img.match(/^data:(image\/[a-z+]+);base64,/)
+        if (!match || !ALLOWED_TYPES.has(match[1])) continue
+        if (img.length > 5_000_000) continue // ~3.75MB binary limit
+        sanitizedImages.push(img)
+        if (sanitizedImages.length >= 4) break
       }
-    } catch (err) {
-      const msg = extractProviderErrorMessage(err)
-      const status = err?.status || err?.statusCode
-      console.error('LLM provider error:', err)
+    }
+    const hasImages = sanitizedImages.length > 0
 
-      // If 422 with images, retry without images (Tinker may not support data: URLs)
-      if (status === 422 && hasImages && !imageFallbackUsed) {
-        console.log('⚠️  Retrying without images - Tinker may not support base64 data URLs')
-        imageFallbackUsed = true
-        try {
-          const model = llmModel || modelId || 'gpt-4o-mini'
-          const messagesWithoutImages = [
-            ...historyForLlm.map((m) => ({ role: m.role, content: m.content })),
-            { 
-              role: 'user', 
-              content: textContent || '[Image received but model does not support vision]' 
+    if (!content?.trim() && !hasImages) {
+      return res.status(400).json({ error: 'Message content or image is required' })
+    }
+    const chat = await db.prepare('SELECT id, title FROM chats WHERE id = ? AND user_id = ?').get(chatId, req.userId)
+    if (!chat) return res.status(404).json({ error: 'Chat not found' })
+
+    const textContent = content?.trim() || ''
+    const userInsert = await db
+      .prepare('INSERT INTO messages (chat_id, role, mode, content) VALUES (?, ?, ?, ?)')
+      .run(chatId, 'user', mode, textContent)
+
+    // Fetch history excluding the just-inserted message, then append current turn
+    const historyForLlm = await db.prepare(
+      'SELECT role, content FROM messages WHERE chat_id = ? AND mode = ? AND id != ? ORDER BY created_at ASC'
+    ).all(chatId, mode, userInsert.lastInsertRowid)
+
+    const currentUserContent = hasImages
+      ? [
+          { type: 'text', text: textContent || 'Please analyze the attached image.' },
+          ...sanitizedImages.map((url) => ({ type: 'image_url', image_url: { url } })),
+        ]
+      : textContent
+
+    const messagesForLlm = [
+      ...historyForLlm.map((m) => ({ role: m.role, content: m.content })),
+      { role: 'user', content: currentUserContent },
+    ]
+
+    const isTinker = llmBaseUrl && llmBaseUrl.includes('tinker')
+
+    let assistantContent
+    let imageFallbackUsed = false
+    if (openai) {
+      try {
+        const model = llmModel || modelId || 'gpt-4o-mini'
+        if (isTinker) {
+          // Debug: log request structure for vision requests
+          if (hasImages) {
+            console.log('Sending vision request to Tinker with structure:', {
+              model,
+              messageCount: messagesForLlm.length,
+              firstMessageContentType: typeof messagesForLlm[0]?.content,
+              hasImageUrls: Array.isArray(messagesForLlm[0]?.content) ? 'yes' : 'no',
+            })
+          }
+          
+          const completion = await openai.chat.completions.create({
+            model,
+            messages: [
+              { role: 'system', content: systemPromptForMode(mode) },
+              ...messagesForLlm.map((m) => ({ role: m.role, content: m.content })),
+            ],
+            max_tokens: 1400,
+            temperature: 0.7,
+          })
+          assistantContent = completion.choices[0]?.message?.content?.trim() || 'No response generated.'
+        } else {
+          const completion = await openai.chat.completions.create({
+            model,
+            messages: [
+              { role: 'system', content: systemPromptForMode(mode) },
+              ...messagesForLlm.map((m) => ({ role: m.role, content: m.content })),
+            ],
+            max_tokens: 1400,
+          })
+          assistantContent = completion.choices[0]?.message?.content?.trim() || 'No response generated.'
+        }
+      } catch (err) {
+        const msg = extractProviderErrorMessage(err)
+        const status = err?.status || err?.statusCode
+        console.error('LLM provider error:', err)
+
+        // If 422 with images, retry without images (Tinker may not support data: URLs)
+        if (status === 422 && hasImages && !imageFallbackUsed) {
+          console.log('⚠️  Retrying without images - Tinker may not support base64 data URLs')
+          imageFallbackUsed = true
+          try {
+            const model = llmModel || modelId || 'gpt-4o-mini'
+            const messagesWithoutImages = [
+              ...historyForLlm.map((m) => ({ role: m.role, content: m.content })),
+              { 
+                role: 'user', 
+                content: textContent || '[Image received but model does not support vision]' 
             },
           ]
           
@@ -476,31 +517,37 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
     assistantContent = 'Haggle AI demo: configure your LLM provider in server/.env (for Tinker, set TINKER_API_KEY and optionally TINKER_BASE_URL / TINKER_MODEL).'
   }
 
-  assistantContent = sanitizeAssistantOutput(assistantContent)
+    assistantContent = sanitizeAssistantOutput(assistantContent)
 
-  const assistantInsert = db
-    .prepare('INSERT INTO messages (chat_id, role, mode, content) VALUES (?, ?, ?, ?)')
-    .run(chatId, 'assistant', mode, assistantContent)
+    const assistantInsert = await db
+      .prepare('INSERT INTO messages (chat_id, role, mode, content) VALUES (?, ?, ?, ?)')
+      .run(chatId, 'assistant', mode, assistantContent)
 
-  db.prepare("UPDATE chats SET updated_at = datetime('now') WHERE id = ?").run(chatId)
-  const titleSource = textContent || (hasImages ? '[Image]' : '')
-  if (chat.title === 'New project' && titleSource) {
-    const firstLine = titleSource.slice(0, 50).trim() + (titleSource.length > 50 ? '...' : '')
-    db.prepare('UPDATE chats SET title = ? WHERE id = ?').run(firstLine, chatId)
+    await db.prepare("UPDATE chats SET updated_at = datetime('now') WHERE id = ?").run(chatId)
+    const titleSource = textContent || (hasImages ? '[Image]' : '')
+    if (chat.title === 'New project' && titleSource) {
+      const firstLine = titleSource.slice(0, 50).trim() + (titleSource.length > 50 ? '...' : '')
+      await db.prepare('UPDATE chats SET title = ? WHERE id = ?').run(firstLine, chatId)
+    }
+
+    const userMsg = await db
+      .prepare('SELECT id, role, mode, content, created_at FROM messages WHERE id = ?')
+      .get(userInsert.lastInsertRowid)
+    const assistantMsg = await db
+      .prepare('SELECT id, role, mode, content, created_at FROM messages WHERE id = ?')
+      .get(assistantInsert.lastInsertRowid)
+    const updatedChat = await db.prepare('SELECT title FROM chats WHERE id = ?').get(chatId)
+    
+    res.status(201).json({
+      userMessage: { id: userMsg.id, role: 'user', mode: userMsg.mode, content: userMsg.content, created_at: userMsg.created_at },
+      assistantMessage: { id: assistantMsg.id, role: 'assistant', mode: assistantMsg.mode, content: assistantMsg.content, created_at: assistantMsg.created_at },
+      mode,
+      chatTitle: updatedChat.title,
+    })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to send message' })
   }
-
-  const userMsg = db
-    .prepare('SELECT id, role, mode, content, created_at FROM messages WHERE id = ?')
-    .get(userInsert.lastInsertRowid)
-  const assistantMsg = db
-    .prepare('SELECT id, role, mode, content, created_at FROM messages WHERE id = ?')
-    .get(assistantInsert.lastInsertRowid)
-  res.status(201).json({
-    userMessage: { id: userMsg.id, role: 'user', mode: userMsg.mode, content: userMsg.content, created_at: userMsg.created_at },
-    assistantMessage: { id: assistantMsg.id, role: 'assistant', mode: assistantMsg.mode, content: assistantMsg.content, created_at: assistantMsg.created_at },
-    mode,
-    chatTitle: db.prepare('SELECT title FROM chats WHERE id = ?').get(chatId).title,
-  })
 })
 
 app.listen(PORT, () => {
