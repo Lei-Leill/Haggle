@@ -165,15 +165,15 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     if (!email?.trim() || !password || !name?.trim()) {
       return res.status(400).json({ error: 'Email, password, and name are required' })
     }
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.trim().toLowerCase())
+    const existing = await db.prepare('SELECT id FROM users WHERE email = ?').get(email.trim().toLowerCase())
     if (existing) {
       return res.status(400).json({ error: 'Email already registered' })
     }
     const password_hash = await bcrypt.hash(password, 10)
-    const result = db.prepare(
+    const result = await db.prepare(
       'INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)'
     ).run(email.trim().toLowerCase(), password_hash, name.trim())
-    const user = db.prepare('SELECT id, email, name FROM users WHERE id = ?').get(result.lastInsertRowid)
+    const user = await db.prepare('SELECT id, email, name FROM users WHERE id = ?').get(result.lastInsertRowid)
     const token = signToken({ userId: user.id, email: user.email })
     res.json({ user: { id: user.id, email: user.email, name: user.name }, token })
   } catch (err) {
@@ -188,7 +188,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     if (!email?.trim() || !password) {
       return res.status(400).json({ error: 'Email and password are required' })
     }
-    const user = db.prepare('SELECT id, email, name, password_hash FROM users WHERE email = ?')
+    const user = await db.prepare('SELECT id, email, name, password_hash FROM users WHERE email = ?')
       .get(email.trim().toLowerCase())
     if (!user || !(await bcrypt.compare(password, user.password_hash))) {
       return res.status(401).json({ error: 'Invalid email or password' })
