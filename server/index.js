@@ -277,24 +277,61 @@ app.get('/api/chats/:id', authMiddleware, async (req, res) => {
   try {
     const mode = normalizeMode(req.query.mode)
     const includeContext = req.query.includeContext === 'true'
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200) // Max 200 messages per request
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0)
+    
     const chat = await db.prepare(
       'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE id = ? AND user_id = ?'
     ).get(req.params.id, req.userId)
     if (!chat) return res.status(404).json({ error: 'Chat not found' })
 
-    const messages = includeContext && mode === 'negotiation'
-      ? await db.prepare(
+    let messages = []
+    let totalMessageCount = 0
+
+    if (includeContext && mode === 'negotiation') {
+      // For negotiation mode, fetch both chat and negotiation messages
+      const countResult = await db.prepare(
+        `SELECT COUNT(*) as count FROM messages WHERE chat_id = ? AND mode IN ('chat', 'negotiation')`
+      ).get(chat.id)
+      totalMessageCount = countResult?.count || 0
+
+      messages = await db.prepare(
         `SELECT id, role, mode, content, created_at
          FROM messages
          WHERE chat_id = ? AND mode IN ('chat', 'negotiation')
-         ORDER BY created_at ASC, id ASC`
-      ).all(chat.id)
-      : await db.prepare(
-        'SELECT id, role, mode, content, created_at FROM messages WHERE chat_id = ? AND mode = ? ORDER BY created_at ASC, id ASC'
-      ).all(chat.id, mode)
+         ORDER BY created_at DESC
+         LIMIT ? OFFSET ?`
+      ).all(chat.id, limit, offset)
+      
+      // Reverse to show oldest first
+      messages = messages.reverse()
+    } else {
+      // For regular mode, fetch only messages in that mode (paginated)
+      const countResult = await db.prepare(
+        `SELECT COUNT(*) as count FROM messages WHERE chat_id = ? AND mode = ?`
+      ).get(chat.id, mode)
+      totalMessageCount = countResult?.count || 0
+
+      messages = await db.prepare(
+        'SELECT id, role, mode, content, created_at FROM messages WHERE chat_id = ? AND mode = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
+      ).all(chat.id, mode, limit, offset)
+      
+      // Reverse to show oldest first
+      messages = messages.reverse()
+    }
 
     res.set('Cache-Control', 'private, max-age=30')
-    res.json({ ...chat, mode, messages })
+    res.json({ 
+      ...chat, 
+      mode, 
+      messages,
+      pagination: {
+        limit,
+        offset,
+        total: totalMessageCount,
+        hasMore: offset + limit < totalMessageCount
+      }
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to load chat' })
@@ -550,8 +587,12 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
       .run(chatId, 'assistant', mode, assistantContent)
 
     await db.prepare("UPDATE chats SET updated_at = datetime('now') WHERE id = ?").run(chatId)
+    
+    // Auto-rename ONLY if this is a project (not nested chat) with default title "New project"
+    // This only happens for the main project on first use, not for nested chats
+    const isProject = chat.parent_id === null
     const titleSource = textContent || (hasImages ? '[Image]' : '')
-    if (chat.title === 'New project' && titleSource) {
+    if (isProject && chat.title === 'New project' && titleSource) {
       const firstLine = titleSource.slice(0, 50).trim() + (titleSource.length > 50 ? '...' : '')
       await db.prepare('UPDATE chats SET title = ? WHERE id = ?').run(firstLine, chatId)
     }

@@ -96,11 +96,25 @@ export async function getChatChildren(id) {
   }
 }
 
-export async function getChat(id, mode = 'chat', includeContext = false) {
+export async function getChat(id, mode = 'chat', includeContext = false, limit = 50, offset = 0) {
   try {
-    const query = `?mode=${encodeURIComponent(mode)}&includeContext=${includeContext ? 'true' : 'false'}`
+    const query = `?mode=${encodeURIComponent(mode)}&includeContext=${includeContext ? 'true' : 'false'}&limit=${limit}&offset=${offset}`
     const res = await fetch(`${API_BASE}/api/chats/${id}${query}`, { headers: getHeaders() })
     return await parseResponse(res, 'Failed to load project')
+  } catch (err) {
+    throw normalizeError(err)
+  }
+}
+
+export async function loadEarlierMessages(id, mode = 'chat', offset) {
+  try {
+    const query = `?mode=${encodeURIComponent(mode)}&includeContext=false&limit=50&offset=${offset}`
+    const res = await fetch(`${API_BASE}/api/chats/${id}${query}`, { headers: getHeaders() })
+    const data = await parseResponse(res, 'Failed to load earlier messages')
+    return {
+      messages: data.messages,
+      pagination: data.pagination,
+    }
   } catch (err) {
     throw normalizeError(err)
   }

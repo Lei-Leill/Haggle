@@ -21,6 +21,7 @@ function App() {
   const [chatLoading, setChatLoading] = useState(false)
   const [sendLoading, setSendLoading] = useState(false)
   const [selectedModel, setSelectedModel] = useState('gpt-4o-mini')
+  const [pagination, setPagination] = useState({ limit: 50, offset: 0, total: 0, hasMore: false })
 
   const loadProjects = useCallback(async () => {
     if (!user) return
@@ -56,6 +57,7 @@ function App() {
     const cachedMessages = messageCache.get(id, mode)
     if (cachedMessages) {
       setMessages(cachedMessages)
+      setPagination({ limit: 50, offset: 0, total: cachedMessages.length, hasMore: false })
       return
     }
 
@@ -63,13 +65,15 @@ function App() {
     setMessages([])
     try {
       const includeContext = mode === 'negotiation'
-      const project = await api.getChat(id, mode, includeContext)
+      const project = await api.getChat(id, mode, includeContext, 50, 0)
       const msgs = project.messages || []
       messageCache.set(id, mode, msgs)
       setMessages(msgs)
+      setPagination(project.pagination || { limit: 50, offset: 0, total: msgs.length, hasMore: false })
     } catch (err) {
       console.error('Failed to load project', err)
       setMessages([])
+      setPagination({ limit: 50, offset: 0, total: 0, hasMore: false })
     } finally {
       setChatLoading(false)
     }
@@ -178,6 +182,18 @@ function App() {
   const handleModeChange = useCallback((mode) => {
     setActiveMode(mode)
   }, [])
+
+  const handleLoadEarlierMessages = useCallback(async () => {
+    if (!activeProjectId || !pagination.hasMore) return
+    
+    try {
+      const result = await api.loadEarlierMessages(activeProjectId, activeMode, pagination.offset + pagination.limit)
+      setMessages((prev) => [...result.messages, ...prev])
+      setPagination(result.pagination)
+    } catch (err) {
+      console.error('Failed to load earlier messages', err)
+    }
+  }, [activeProjectId, activeMode, pagination])
 
   useEffect(() => {
     if (!activeProjectId) return
@@ -313,6 +329,8 @@ function App() {
           hasProject={Boolean(activeProjectId)}
           activeProjectId={activeProjectId}
           isViewingProject={isViewingProject()}
+          pagination={pagination}
+          onLoadEarlier={handleLoadEarlierMessages}
         />
       </div>
     </div>

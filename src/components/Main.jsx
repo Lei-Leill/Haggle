@@ -29,21 +29,6 @@ const IconWaveform = () => (
   </svg>
 )
 
-const IconRegenerate = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-    <path d="M3 3v5h5" />
-  </svg>
-)
-
-const IconCompare = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <rect x="3" y="3" width="7" height="7" />
-    <rect x="14" y="3" width="7" height="7" />
-    <path d="M6.5 10v4M17.5 10v4" />
-  </svg>
-)
-
 const MODE_COPY = {
   chat: {
     label: 'Chat',
@@ -124,10 +109,11 @@ function MessageContent({ message }) {
   )
 }
 
-export default function Main({ messages, onSendMessage, isEmpty, sendLoading, activeMode, onModeChange, hasProject, activeProjectId, chatLoading, isViewingProject }) {
+export default function Main({ messages, onSendMessage, isEmpty, sendLoading, activeMode, onModeChange, hasProject, activeProjectId, chatLoading, isViewingProject, pagination = { hasMore: false }, onLoadEarlier = () => {} }) {
   const [input, setInput] = useState('')
   const [sellerInput, setSellerInput] = useState('')
   const [showSurvey, setShowSurvey] = useState(false)
+  const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [surveyActiveTab, setSurveyActiveTab] = useState('sources')
   const messagesEndRef = useRef(null)
   const sellerEndRef = useRef(null)
@@ -438,6 +424,23 @@ export default function Main({ messages, onSendMessage, isEmpty, sendLoading, ac
           </div>
         ) : (
           <div className="main-messages">
+            {pagination?.hasMore && (
+              <button
+                type="button"
+                className="main-load-earlier-btn"
+                onClick={async () => {
+                  setLoadingEarlier(true)
+                  try {
+                    await onLoadEarlier()
+                  } finally {
+                    setLoadingEarlier(false)
+                  }
+                }}
+                disabled={loadingEarlier}
+              >
+                {loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}
+              </button>
+            )}
             {messages.map((msg, i) => (
               <div key={msg.id ?? `m-${i}`} className={`main-message main-message--${msg.role}`}>
                 <div className="main-message-inner">
@@ -451,17 +454,6 @@ export default function Main({ messages, onSendMessage, isEmpty, sendLoading, ac
               </div>
             ))}
             <div ref={messagesEndRef} />
-          </div>
-        )}
-
-        {!isNegotiationSplit && (
-          <div className="main-actions-float">
-            <button type="button" className="main-action-btn" aria-label="Compare">
-              <IconCompare />
-            </button>
-            <button type="button" className="main-action-btn" aria-label="Regenerate">
-              <IconRegenerate />
-            </button>
           </div>
         )}
 

@@ -80,6 +80,30 @@
   padding: 24px 0;
 }
 
+.main-load-earlier-btn {
+  display: block;
+  margin: 0 auto 24px;
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.main-load-earlier-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.main-load-earlier-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .main-message {
   margin-bottom: 24px;
 }
@@ -221,34 +245,6 @@
 
 .main-markdown a:hover {
   text-decoration: underline;
-}
-
-.main-actions-float {
-  position: absolute;
-  right: 24px;
-  bottom: 100px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.main-action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: var(--bg-tertiary);
-  color: var(--accent);
-  transition: background 0.15s, transform 0.15s;
-}
-
-.main-action-btn:hover {
-  background: var(--bg-input);
-  transform: scale(1.05);
 }
 
 .main-form {
