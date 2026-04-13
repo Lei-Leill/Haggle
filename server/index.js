@@ -38,6 +38,17 @@ app.use(cors({
 }))
 app.use(express.json({ limit: '20mb' }))
 
+// ===== Response Caching Headers =====
+app.use((req, res, next) => {
+  // Add caching headers for GET requests
+  if (req.method === 'GET') {
+    res.set('Cache-Control', 'private, max-age=60') // Cache for 1 minute
+  } else {
+    res.set('Cache-Control', 'no-cache')
+  }
+  next()
+})
+
 // ===== Rate Limiting =====
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -207,11 +218,12 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
 // ----- Chats (protected) -----
 app.get('/api/chats', authMiddleware, async (req, res) => {
   try {
+    // Fetch only necessary columns for projects list
     const chats = await db.prepare(
       'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE user_id = ? AND parent_id IS NULL ORDER BY updated_at DESC'
     ).all(req.userId)
     
-    // Fetch children for each project
+    // Fetch children for each project (lightweight query - only metadata)
     const projectsWithChildren = await Promise.all(chats.map(async project => {
       const children = await db.prepare(
         'SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE parent_id = ? ORDER BY updated_at DESC'
@@ -219,6 +231,7 @@ app.get('/api/chats', authMiddleware, async (req, res) => {
       return { ...project, children }
     }))
     
+    res.set('Cache-Control', 'private, max-age=60')
     res.json({ chats: projectsWithChildren })
   } catch (err) {
     console.error(err)
@@ -280,6 +293,7 @@ app.get('/api/chats/:id', authMiddleware, async (req, res) => {
         'SELECT id, role, mode, content, created_at FROM messages WHERE chat_id = ? AND mode = ? ORDER BY created_at ASC, id ASC'
       ).all(chat.id, mode)
 
+    res.set('Cache-Control', 'private, max-age=30')
     res.json({ ...chat, mode, messages })
   } catch (err) {
     console.error(err)
@@ -326,32 +340,44 @@ app.post('/api/chats/:id/metadata', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'Chat not found' })
     }
     
-    try {
+    // Check if metadata already exists for this chat
+    const existingMetadata = await db.prepare('SELECT id FROM project_metadata WHERE chat_id = ?').get(chatId)
+    
+    if (existingMetadata) {
+      // Update existing record
+      await db.prepare(`
+        UPDATE project_metadata 
+        SET item_listing = ?, listed_price = ?, target_price = ?, max_price = ?, ideal_extras = ?, urgency = ?, private_notes = ?, seller_type = ?, updated_at = datetime('now')
+        WHERE chat_id = ?
+      `).run(item_listing || null, listed_price || null, target_price || null, max_price || null, ideal_extras || null, urgency || null, private_notes || null, seller_type || null, chatId)
+      
+      // Auto-update chat title from item_listing if provided
+      if (item_listing?.trim()) {
+        const titleFromItem = item_listing.slice(0, 60).trim() + (item_listing.length > 60 ? '...' : '')
+        await db.prepare('UPDATE chats SET title = ?, updated_at = datetime("now") WHERE id = ?').run(titleFromItem, chatId)
+      }
+      
+      const metadata = await db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
+      res.json(metadata)
+    } else {
+      // Insert new record
       await db.prepare(`
         INSERT INTO project_metadata (chat_id, item_listing, listed_price, target_price, max_price, ideal_extras, urgency, private_notes, seller_type)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(chatId, item_listing || null, listed_price || null, target_price || null, max_price || null, ideal_extras || null, urgency || null, private_notes || null, seller_type || null)
       
+      // Auto-update chat title from item_listing if provided
+      if (item_listing?.trim()) {
+        const titleFromItem = item_listing.slice(0, 60).trim() + (item_listing.length > 60 ? '...' : '')
+        await db.prepare('UPDATE chats SET title = ?, updated_at = datetime("now") WHERE id = ?').run(titleFromItem, chatId)
+      }
+      
       const metadata = await db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
       res.status(201).json(metadata)
-    } catch (err) {
-      if (err.message.includes('UNIQUE')) {
-        // Update if exists
-        await db.prepare(`
-          UPDATE project_metadata 
-          SET item_listing = ?, listed_price = ?, target_price = ?, max_price = ?, ideal_extras = ?, urgency = ?, private_notes = ?, seller_type = ?, updated_at = datetime('now')
-          WHERE chat_id = ?
-        `).run(item_listing || null, listed_price || null, target_price || null, max_price || null, ideal_extras || null, urgency || null, private_notes || null, seller_type || null, chatId)
-        
-        const metadata = await db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
-        res.json(metadata)
-      } else {
-        throw err
-      }
     }
   } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: 'Failed to save metadata' })
+    console.error('Metadata save error:', err.message, err.stack)
+    res.status(500).json({ error: 'Failed to save metadata', details: err.message })
   }
 })
 

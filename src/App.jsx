@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from './context/AuthContext'
 import * as api from './api'
+import { messageCache, projectCache, metadataCache, clearAllCaches } from './cache'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import Main from './components/Main'
@@ -23,9 +24,18 @@ function App() {
 
   const loadProjects = useCallback(async () => {
     if (!user) return
+
+    // Check cache first
+    const cached = projectCache.get()
+    if (cached) {
+      setProjects(cached)
+      return
+    }
+
     setChatLoading(true)
     try {
       const list = await api.getChats()
+      projectCache.set(list)
       setProjects(list)
     } catch (err) {
       console.error('Failed to load projects', err)
@@ -34,17 +44,29 @@ function App() {
     }
   }, [user])
 
+  // Load projects only when user logs in
   useEffect(() => {
-    loadProjects()
-  }, [loadProjects])
+    if (user) {
+      loadProjects()
+    }
+  }, [user])
 
   const loadProjectMessages = useCallback(async (id, mode = activeMode) => {
+    // Check cache first - if messages are cached, use them
+    const cachedMessages = messageCache.get(id, mode)
+    if (cachedMessages) {
+      setMessages(cachedMessages)
+      return
+    }
+
     setChatLoading(true)
     setMessages([])
     try {
       const includeContext = mode === 'negotiation'
       const project = await api.getChat(id, mode, includeContext)
-      setMessages(project.messages || [])
+      const msgs = project.messages || []
+      messageCache.set(id, mode, msgs)
+      setMessages(msgs)
     } catch (err) {
       console.error('Failed to load project', err)
       setMessages([])
@@ -57,6 +79,7 @@ function App() {
     try {
       const project = await api.createChat({ title: 'New project', category: 'project' })
       setProjects((prev) => [{ ...project, children: [] }, ...prev])
+      projectCache.invalidate()
       setActiveProjectId(project.id)
       setActiveMode('chat')
       setMessages([])
@@ -69,6 +92,8 @@ function App() {
     try {
       await api.deleteChat(projectId)
       setProjects((prev) => prev.filter((p) => p.id !== projectId))
+      projectCache.invalidate()
+      messageCache.invalidate(projectId)
       if (activeProjectId === projectId) {
         setActiveProjectId(null)
         setMessages([])
@@ -82,13 +107,14 @@ function App() {
   const handleDeleteChat = useCallback(async (chatId) => {
     try {
       await api.deleteChat(chatId)
-      // Remove chat from the appropriate project
       setProjects((prev) =>
         prev.map((project) => ({
           ...project,
           children: (project.children || []).filter((chat) => chat.id !== chatId),
         }))
       )
+      projectCache.invalidate()
+      messageCache.invalidate(chatId)
       if (activeProjectId === chatId) {
         setActiveProjectId(null)
         setMessages([])
@@ -113,6 +139,7 @@ function App() {
           return project
         })
       )
+      projectCache.invalidate()
     } catch (err) {
       console.error('Failed to create chat', err)
       alert('Failed to create chat')
@@ -136,6 +163,7 @@ function App() {
           }
         })
       )
+      projectCache.invalidate()
     } catch (err) {
       console.error('Failed to rename:', err)
       throw err
@@ -154,7 +182,7 @@ function App() {
   useEffect(() => {
     if (!activeProjectId) return
     loadProjectMessages(activeProjectId, activeMode)
-  }, [activeProjectId, activeMode, loadProjectMessages])
+  }, [activeProjectId, activeMode])
 
   const handleSendMessage = useCallback(async (text, images = []) => {
     if (!text.trim() && images.length === 0) return
@@ -180,10 +208,13 @@ function App() {
 
     try {
       const result = await api.sendMessage(projectId, text, selectedModel, activeMode, images)
+      const newMessages = [{ ...result.userMessage, images }, result.assistantMessage]
       setMessages((prev) => {
         const withoutLast = prev.slice(0, -1)
-        return [...withoutLast, { ...result.userMessage, images }, result.assistantMessage]
+        return [...withoutLast, ...newMessages]
       })
+      // Update cache with new messages
+      messageCache.set(projectId, activeMode, [...messages, ...newMessages])
       if (result.chatTitle) {
         setProjects((prev) =>
           prev.map((project) => {
