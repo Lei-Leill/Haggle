@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
+import VipCodeRedemption from '../components/VipCodeRedemption'
 import './Auth.css'
 
 export default function Register({ onSwitchToLogin }) {
@@ -10,6 +11,7 @@ export default function Register({ onSwitchToLogin }) {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showVipRedemption, setShowVipRedemption] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -94,7 +96,24 @@ export default function Register({ onSwitchToLogin }) {
             Sign in
           </button>
         </p>
+        <div className="auth-divider">or</div>
+        <button 
+          type="button" 
+          className="auth-vip-btn"
+          onClick={() => setShowVipRedemption(true)}
+        >
+          Have a VIP code? Redeem it
+        </button>
       </div>
+      {showVipRedemption && (
+        <VipCodeRedemption 
+          onSuccess={() => {
+            setShowVipRedemption(false)
+            window.location.href = '/'
+          }}
+          onCancel={() => setShowVipRedemption(false)}
+        />
+      )}
     </div>
   )
 }

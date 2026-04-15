@@ -78,7 +78,7 @@ const MODELS = [
   { id: 'gpt-4o', label: 'Haggle AI Pro' },
 ]
 
-export default function Header({ onMenuClick, user, selectedModel, onSelectModel, token }) {
+export default function Header({ onMenuClick, user, selectedModel, onSelectModel, token, messageCount = 0 }) {
   const [modelOpen, setModelOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
@@ -92,7 +92,7 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
     if (token) {
       fetchTokenBalance()
     }
-  }, [token])
+  }, [token, messageCount])
 
   const fetchTokenBalance = async () => {
     try {
@@ -135,7 +135,7 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
       <div className="header-center">
         <div className="header-token-display">
           <IconZap />
-          <span>{tokensRemaining}</span>
+          <span>{tokensRemaining} tokens remaining</span>
         </div>
         <div className="header-model-wrap" ref={modelRef}>
           <button
@@ -177,6 +177,7 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
           title="Send us feedback"
         >
           <IconMessageSquare />
+          <span>Feedback</span>
         </button>
         <button
           type="button"

@@ -3,6 +3,7 @@ import express from 'express'
 import cors from 'cors'
 import rateLimit from 'express-rate-limit'
 import bcrypt from 'bcryptjs'
+import crypto from 'crypto'
 import db from './db.js'
 import { signToken, authMiddleware } from './auth.js'
 import OpenAI from 'openai'
@@ -78,7 +79,7 @@ const openai = llmApiKey
     })
   : null
 
-const PROJECT_MODES = new Set(['chat', 'negotiation', 'practice'])
+const PROJECT_MODES = new Set(['chat', 'negotiation'])
 
 function normalizeMode(inputMode) {
   return PROJECT_MODES.has(inputMode) ? inputMode : 'chat'
@@ -92,13 +93,6 @@ The user gives what the counterparty said. Reply with:
 2) why this works in one sentence,
 3) one fallback alternative.
 Keep it tactical, concise, and realistic.
-Do not output chain-of-thought, hidden reasoning, or <think> tags.`
-  }
-  if (mode === 'practice') {
-    return `You are Haggle AI in role-play practice mode.
-Act as the user's counterparty in a realistic negotiation simulation.
-Stay in character, push back naturally, and help the user practice.
-After each turn, add a brief coaching tip in one sentence.
 Do not output chain-of-thought, hidden reasoning, or <think> tags.`
   }
   return `You are Haggle AI in project setup mode.
@@ -218,6 +212,127 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Login failed' })
+  }
+})
+
+// ----- Password Reset -----
+app.post('/api/auth/forgot-password', authLimiter, async (req, res) => {
+  try {
+    const { email } = req.body
+    if (!email?.trim()) {
+      return res.status(400).json({ error: 'Email is required' })
+    }
+
+    const user = await db.prepare('SELECT id, email FROM users WHERE email = ?')
+      .get(email.trim().toLowerCase())
+    
+    if (!user) {
+      // For security, don't reveal if email exists or not
+      return res.json({ message: 'If an account exists, a reset link has been sent' })
+    }
+
+    // Generate reset token (30 chars alphanumeric)
+    const resetToken = crypto.randomBytes(15).toString('hex').toUpperCase()
+    const tokenHash = crypto.createHash('sha256').update(resetToken).digest('hex')
+    const expiresAt = new Date(Date.now() + 1 * 60 * 60 * 1000) // 1 hour expiry
+
+    // Delete any existing reset token for this user
+    await db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(user.id)
+
+    // Store reset token
+    await db.prepare(
+      'INSERT INTO password_reset_tokens (user_id, email, reset_token, token_hash, expires_at) VALUES (?, ?, ?, ?, ?)'
+    ).run(user.id, user.email, resetToken, tokenHash, expiresAt.toISOString())
+
+    // In production, send email here with: 
+    // const resetUrl = `https://haggle-ai.org/reset-password?token=${resetToken}`
+    // await sendEmail(user.email, 'Reset Password', `Click here to reset: ${resetUrl}`)
+    
+    console.log(`Reset token for ${user.email}: ${resetToken}`)
+
+    res.json({ message: 'If an account exists, a reset link has been sent' })
+  } catch (err) {
+    console.error('Forgot password error:', err)
+    res.status(500).json({ error: 'Failed to process request' })
+  }
+})
+
+app.post('/api/auth/validate-reset-token', async (req, res) => {
+  try {
+    const { token } = req.body
+    if (!token?.trim()) {
+      return res.status(400).json({ error: 'Reset token is required' })
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
+    const resetToken = await db.prepare(
+      'SELECT id, user_id, expires_at, used_at FROM password_reset_tokens WHERE token_hash = ?'
+    ).get(tokenHash)
+
+    if (!resetToken) {
+      return res.status(400).json({ error: 'Invalid reset link' })
+    }
+
+    if (resetToken.used_at) {
+      return res.status(400).json({ error: 'This reset link has already been used' })
+    }
+
+    const expiresAt = new Date(resetToken.expires_at)
+    if (expiresAt < new Date()) {
+      return res.status(400).json({ error: 'This reset link has expired. Please request a new one.' })
+    }
+
+    res.json({ valid: true })
+  } catch (err) {
+    console.error('Validate token error:', err)
+    res.status(500).json({ error: 'Failed to validate token' })
+  }
+})
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { token, password } = req.body
+    if (!token?.trim() || !password?.trim()) {
+      return res.status(400).json({ error: 'Token and password are required' })
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' })
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
+    const resetToken = await db.prepare(
+      'SELECT id, user_id, expires_at, used_at FROM password_reset_tokens WHERE token_hash = ?'
+    ).get(tokenHash)
+
+    if (!resetToken) {
+      return res.status(400).json({ error: 'Invalid reset link' })
+    }
+
+    if (resetToken.used_at) {
+      return res.status(400).json({ error: 'This reset link has already been used' })
+    }
+
+    const expiresAt = new Date(resetToken.expires_at)
+    if (expiresAt < new Date()) {
+      return res.status(400).json({ error: 'This reset link has expired. Please request a new one.' })
+    }
+
+    // Hash the new password
+    const password_hash = await bcrypt.hash(password, 10)
+
+    // Update user password
+    await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+      .run(password_hash, resetToken.user_id)
+
+    // Mark token as used
+    await db.prepare('UPDATE password_reset_tokens SET used_at = datetime("now") WHERE id = ?')
+      .run(resetToken.id)
+
+    res.json({ message: 'Password reset successfully' })
+  } catch (err) {
+    console.error('Reset password error:', err)
+    res.status(500).json({ error: 'Failed to reset password' })
   }
 })
 

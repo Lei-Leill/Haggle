@@ -304,6 +304,7 @@ function App() {
         selectedModel={selectedModel}
         onSelectModel={setSelectedModel}
         token={localStorage.getItem('haggle_token')}
+        messageCount={messages.length}
       />
       <div className="app-body">
         <Sidebar

@@ -38,10 +38,6 @@ const MODE_COPY = {
     label: 'Negotiation',
     placeholder: 'I am the seller. The buyer said, "Your quote is too high and we can only pay $9,500." What should I reply right now?',
   },
-  practice: {
-    label: 'Practice',
-    placeholder: 'Please role-play as the seller and start a realistic in-person negotiation so I can practice my responses.',
-  },
 }
 
 function parseAssistantContent(rawContent = '') {
