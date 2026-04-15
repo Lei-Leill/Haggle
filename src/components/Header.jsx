@@ -83,6 +83,7 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
   const [tokens, setTokens] = useState(null)
+  const [tokenLoading, setTokenLoading] = useState(true)
   const modelRef = useRef(null)
   const userMenuRef = useRef(null)
   const { logout } = useAuth()
@@ -90,6 +91,7 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
 
   useEffect(() => {
     if (token) {
+      setTokenLoading(true)
       fetchTokenBalance()
     }
   }, [token, messageCount])
@@ -102,6 +104,11 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
       setTokens(response.data)
     } catch (err) {
       console.error('Failed to fetch token balance:', err)
+      console.error('Token being used:', token)
+      console.error('Response status:', err.response?.status)
+      console.error('Response data:', err.response?.data)
+    } finally {
+      setTokenLoading(false)
     }
   }
 
@@ -115,7 +122,7 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
   }, [])
 
   const currentModelLabel = MODELS.find((m) => m.id === selectedModel)?.label || 'Haggle AI 1.0'
-  const tokensRemaining = tokens?.tokens_remaining || 0
+  const tokensRemaining = tokenLoading ? '...' : (tokens?.tokens_remaining || 0)
 
   return (
     <header className="header">
