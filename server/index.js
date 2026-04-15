@@ -185,8 +185,8 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     
     // Create free trial token record (1000 tokens for new users)
     await db.prepare(
-      'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, is_vip) VALUES (?, 1000, 0, 1000, 0)'
-    ).run(user.id)
+      'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, is_vip) VALUES (?, ?, ?, ?, ?)'
+    ).run(user.id, 1000, 0, 1000, 0)
     
     const token = signToken({ userId: user.id, email: user.email })
     res.json({ user: { id: user.id, email: user.email, name: user.name }, token })
@@ -786,8 +786,8 @@ app.post('/api/auth/redeem-vip-code', authMiddleware, async (req, res) => {
     } else {
       // Create new VIP token record
       await db.prepare(
-        'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, vip_code_id, is_vip) VALUES (?, ?, ?, ?, ?, 1)'
-      ).run(req.userId, vipCode.token_allowance, 0, vipCode.token_allowance, vipCode.id)
+        'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, vip_code_id, is_vip) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(req.userId, vipCode.token_allowance, 0, vipCode.token_allowance, vipCode.id, 1)
     }
 
     const updatedTokens = await db.prepare(
@@ -814,8 +814,8 @@ app.get('/api/user/tokens', authMiddleware, async (req, res) => {
     // If no token record exists, create a free trial record
     if (!userTokens) {
       await db.prepare(
-        'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, is_vip) VALUES (?, 1000, 0, 1000, 0)'
-      ).run(req.userId)
+        'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, is_vip) VALUES (?, ?, ?, ?, ?)'
+      ).run(req.userId, 1000, 0, 1000, 0)
       userTokens = await db.prepare(
         'SELECT * FROM user_tokens WHERE user_id = ?'
       ).get(req.userId)
