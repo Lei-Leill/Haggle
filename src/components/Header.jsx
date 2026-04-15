@@ -99,7 +99,8 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
   const fetchTokenBalance = async () => {
     try {
       const response = await axios.get('/api/user/tokens', {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
+        params: { _t: Date.now() } // Cache buster
       })
       setTokens(response.data)
     } catch (err) {

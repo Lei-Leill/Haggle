@@ -41,11 +41,14 @@ app.use(express.json({ limit: '20mb' }))
 
 // ===== Response Caching Headers =====
 app.use((req, res, next) => {
-  // Add caching headers for GET requests
-  if (req.method === 'GET') {
+  // Don't cache user-specific data endpoints
+  const noCachePaths = ['/api/user/tokens', '/api/auth/', '/api/chats']
+  const shouldNotCache = noCachePaths.some(path => req.path.startsWith(path))
+  
+  if (req.method === 'GET' && !shouldNotCache) {
     res.set('Cache-Control', 'private, max-age=60') // Cache for 1 minute
   } else {
-    res.set('Cache-Control', 'no-cache')
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0')
   }
   next()
 })
