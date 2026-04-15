@@ -368,7 +368,7 @@ export default function Sidebar({
             <span className="sidebar-user-badge">Pro</span>
           </div>
           <button type="button" className="sidebar-chevron" aria-label="Expand">
-            <IconChevronUp />
+            <IconChevronDown />
           </button>
         </div>
       </div>

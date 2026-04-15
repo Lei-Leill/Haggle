@@ -22,6 +22,7 @@ function App() {
   const [sendLoading, setSendLoading] = useState(false)
   const [selectedModel, setSelectedModel] = useState('gpt-4o-mini')
   const [pagination, setPagination] = useState({ limit: 50, offset: 0, total: 0, hasMore: false })
+  const [loadError, setLoadError] = useState(null)
 
   const loadProjects = useCallback(async () => {
     if (!user) return
@@ -30,16 +31,19 @@ function App() {
     const cached = projectCache.get()
     if (cached) {
       setProjects(cached)
+      setLoadError(null)
       return
     }
 
     setChatLoading(true)
+    setLoadError(null)
     try {
       const list = await api.getChats()
       projectCache.set(list)
       setProjects(list)
     } catch (err) {
       console.error('Failed to load projects', err)
+      setLoadError(err.message)
     } finally {
       setChatLoading(false)
     }
@@ -293,6 +297,43 @@ function App() {
       <Login onSwitchToRegister={() => setAuthMode('register')} />
     ) : (
       <Register onSwitchToLogin={() => setAuthMode('login')} />
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="app">
+        <Header
+          onMenuClick={() => setSidebarOpen((o) => !o)}
+          user={user}
+          selectedModel={selectedModel}
+          onSelectModel={setSelectedModel}
+          token={localStorage.getItem('haggle_token')}
+          messageCount={messages.length}
+        />
+        <div className="app-body">
+          <div style={{ flex: 1, padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ maxWidth: '600px', textAlign: 'center' }}>
+              <h2 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>Connection Error</h2>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>{loadError}</p>
+              <button 
+                onClick={() => { setLoadError(null); loadProjects() }}
+                style={{
+                  padding: '10px 16px',
+                  background: 'var(--accent)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     )
   }
 
