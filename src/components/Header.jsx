@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
+import * as api from '../api'
 import './Header.css'
 import FeedbackModal from './FeedbackModal'
-import axios from 'axios'
 
 const IconMenu = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -98,16 +98,12 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
 
   const fetchTokenBalance = async () => {
     try {
-      const response = await axios.get('/api/user/tokens', {
-        headers: { Authorization: `Bearer ${token}` },
-        params: { _t: Date.now() } // Cache buster
-      })
-      setTokens(response.data)
+      const response = await api.getUserTokens()
+      setTokens(response)
     } catch (err) {
       console.error('Failed to fetch token balance:', err)
       console.error('Token being used:', token)
-      console.error('Response status:', err.response?.status)
-      console.error('Response data:', err.response?.data)
+      console.error('Error message:', err.message)
     } finally {
       setTokenLoading(false)
     }

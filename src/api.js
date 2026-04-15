@@ -204,6 +204,15 @@ export async function getProjectMetadata(chatId) {
   }
 }
 
+export async function getUserTokens() {
+  try {
+    const res = await fetch(`${API_BASE}/api/user/tokens`, { headers: getHeaders() })
+    return await parseResponse(res, 'Failed to fetch token balance')
+  } catch (err) {
+    throw normalizeError(err)
+  }
+}
+
 export function setToken(token) {
   if (token) localStorage.setItem('haggle_token', token)
   else localStorage.removeItem('haggle_token')
