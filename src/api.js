@@ -1,6 +1,27 @@
 // In dev with Vite, use empty string so proxy forwards to backend
-// In production, use VITE_API_URL environment variable or fallback to same origin
-const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : '')
+// In production, use VITE_API_URL environment variable
+const API_BASE = (() => {
+  const apiUrl = import.meta.env.VITE_API_URL
+  const isDev = import.meta.env.DEV
+  
+  // Log for debugging
+  console.log('API Config:', {
+    VITE_API_URL: apiUrl,
+    isDev: isDev,
+    finalAPI_BASE: apiUrl || (isDev ? '' : undefined)
+  })
+  
+  // In dev, use empty string to leverage Vite proxy
+  if (isDev) return ''
+  
+  // In production, MUST use the env var
+  if (!apiUrl) {
+    console.error('VITE_API_URL environment variable is not set in production!')
+  }
+  
+  return apiUrl || ''
+})()
+
 const SERVER_UNREACHABLE = "Can't reach the server. Start the backend: cd server && npm run dev"
 
 function getToken() {
