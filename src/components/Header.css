@@ -166,3 +166,46 @@
 .header-user-menu-item--danger:hover {
   background: rgba(239, 68, 68, 0.15);
 }
+
+.header-token-display {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fbbf24;
+  margin-right: 12px;
+}
+
+.header-token-display svg {
+  width: 16px;
+  height: 16px;
+}
+
+.header-feedback-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 8px;
+  transition: background 0.15s;
+  cursor: pointer;
+}
+
+.header-feedback-btn:hover {
+  background: var(--bg-tertiary);
+}
+
+.header-feedback-btn svg {
+  width: 18px;
+  height: 18px;
+}
+

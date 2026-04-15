@@ -303,6 +303,7 @@ function App() {
         user={user}
         selectedModel={selectedModel}
         onSelectModel={setSelectedModel}
+        token={localStorage.getItem('haggle_token')}
       />
       <div className="app-body">
         <Sidebar

@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import './Header.css'
+import FeedbackModal from './FeedbackModal'
+import axios from 'axios'
 
 const IconMenu = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -59,18 +61,49 @@ const IconLogout = () => (
   </svg>
 )
 
+const IconMessageSquare = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </svg>
+)
+
+const IconZap = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+  </svg>
+)
+
 const MODELS = [
   { id: 'gpt-4o-mini', label: 'Haggle AI 1.0' },
   { id: 'gpt-4o', label: 'Haggle AI Pro' },
 ]
 
-export default function Header({ onMenuClick, user, selectedModel, onSelectModel }) {
+export default function Header({ onMenuClick, user, selectedModel, onSelectModel, token }) {
   const [modelOpen, setModelOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [showFeedback, setShowFeedback] = useState(false)
+  const [tokens, setTokens] = useState(null)
   const modelRef = useRef(null)
   const userMenuRef = useRef(null)
   const { logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
+
+  useEffect(() => {
+    if (token) {
+      fetchTokenBalance()
+    }
+  }, [token])
+
+  const fetchTokenBalance = async () => {
+    try {
+      const response = await axios.get('/api/user/tokens', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      setTokens(response.data)
+    } catch (err) {
+      console.error('Failed to fetch token balance:', err)
+    }
+  }
 
   useEffect(() => {
     function handleClick(e) {
@@ -82,6 +115,7 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
   }, [])
 
   const currentModelLabel = MODELS.find((m) => m.id === selectedModel)?.label || 'Haggle AI 1.0'
+  const tokensRemaining = tokens?.tokens_remaining || 0
 
   return (
     <header className="header">
@@ -99,6 +133,10 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
         </button>
       </div>
       <div className="header-center">
+        <div className="header-token-display">
+          <IconZap />
+          <span>{tokensRemaining}</span>
+        </div>
         <div className="header-model-wrap" ref={modelRef}>
           <button
             type="button"
@@ -134,6 +172,14 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
       <div className="header-right" ref={userMenuRef}>
         <button
           type="button"
+          className="header-feedback-btn"
+          onClick={() => setShowFeedback(true)}
+          title="Send us feedback"
+        >
+          <IconMessageSquare />
+        </button>
+        <button
+          type="button"
           className="header-icon-btn"
           aria-label="Account menu"
           aria-expanded={userMenuOpen}
@@ -157,6 +203,17 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
             </button>
             <button
               type="button"
+              className="header-user-menu-item"
+              onClick={() => {
+                setShowFeedback(true)
+                setUserMenuOpen(false)
+              }}
+            >
+              <IconMessageSquare />
+              Send Feedback
+            </button>
+            <button
+              type="button"
               className="header-user-menu-item header-user-menu-item--danger"
               onClick={() => {
                 logout()
@@ -169,6 +226,12 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
           </div>
         )}
       </div>
+      {showFeedback && (
+        <FeedbackModal 
+          onClose={() => setShowFeedback(false)}
+          token={token}
+        />
+      )}
     </header>
   )
 }

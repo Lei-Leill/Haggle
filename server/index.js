@@ -185,6 +185,12 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
       'INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)'
     ).run(email.trim().toLowerCase(), password_hash, name.trim())
     const user = await db.prepare('SELECT id, email, name FROM users WHERE id = ?').get(result.lastInsertRowid)
+    
+    // Create free trial token record (1000 tokens for new users)
+    await db.prepare(
+      'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, is_vip) VALUES (?, 1000, 0, 1000, 0)'
+    ).run(user.id)
+    
     const token = signToken({ userId: user.id, email: user.email })
     res.json({ user: { id: user.id, email: user.email, name: user.name }, token })
   } catch (err) {
@@ -614,6 +620,123 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to send message' })
+  }
+})
+
+// ----- Token & VIP System (protected) -----
+
+// Redeem VIP code and allocate tokens
+app.post('/api/auth/redeem-vip-code', authMiddleware, async (req, res) => {
+  try {
+    const { code } = req.body
+    if (!code?.trim()) {
+      return res.status(400).json({ error: 'VIP code is required' })
+    }
+
+    const vipCode = await db.prepare(
+      'SELECT id, token_allowance, is_used, used_by_user_id FROM vip_codes WHERE code = ?'
+    ).get(code.trim().toUpperCase())
+
+    if (!vipCode) {
+      return res.status(404).json({ error: 'VIP code not found' })
+    }
+
+    if (vipCode.is_used) {
+      return res.status(400).json({ error: 'This VIP code has already been used' })
+    }
+
+    // Check if user already has VIP status
+    const existingTokens = await db.prepare(
+      'SELECT id, is_vip, tokens_remaining FROM user_tokens WHERE user_id = ?'
+    ).get(req.userId)
+
+    if (existingTokens && existingTokens.is_vip) {
+      return res.status(400).json({ error: 'Your account already has VIP access' })
+    }
+
+    // Mark code as used
+    await db.prepare(
+      'UPDATE vip_codes SET is_used = 1, used_by_user_id = ?, used_at = datetime("now") WHERE id = ?'
+    ).run(req.userId, vipCode.id)
+
+    // Create or update token record
+    if (existingTokens) {
+      // Update existing (add VIP tokens to balance)
+      await db.prepare(
+        'UPDATE user_tokens SET is_vip = 1, vip_code_id = ?, tokens_remaining = tokens_remaining + ?, updated_at = datetime("now") WHERE user_id = ?'
+      ).run(vipCode.id, vipCode.token_allowance, req.userId)
+    } else {
+      // Create new VIP token record
+      await db.prepare(
+        'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, vip_code_id, is_vip) VALUES (?, ?, ?, ?, ?, 1)'
+      ).run(req.userId, vipCode.token_allowance, 0, vipCode.token_allowance, vipCode.id)
+    }
+
+    const updatedTokens = await db.prepare(
+      'SELECT * FROM user_tokens WHERE user_id = ?'
+    ).get(req.userId)
+
+    res.json({
+      message: 'VIP code redeemed successfully!',
+      tokens: updatedTokens
+    })
+  } catch (err) {
+    console.error('VIP redemption error:', err)
+    res.status(500).json({ error: 'Failed to redeem VIP code' })
+  }
+})
+
+// Get user's token balance
+app.get('/api/user/tokens', authMiddleware, async (req, res) => {
+  try {
+    let userTokens = await db.prepare(
+      'SELECT * FROM user_tokens WHERE user_id = ?'
+    ).get(req.userId)
+
+    // If no token record exists, create a free trial record
+    if (!userTokens) {
+      await db.prepare(
+        'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, is_vip) VALUES (?, 1000, 0, 1000, 0)'
+      ).run(req.userId)
+      userTokens = await db.prepare(
+        'SELECT * FROM user_tokens WHERE user_id = ?'
+      ).get(req.userId)
+    }
+
+    res.json(userTokens)
+  } catch (err) {
+    console.error('Get tokens error:', err)
+    res.status(500).json({ error: 'Failed to fetch token balance' })
+  }
+})
+
+// Submit user feedback
+app.post('/api/feedback', authMiddleware, async (req, res) => {
+  try {
+    const { category = 'general', rating, message, contact_email } = req.body
+
+    if (!message?.trim()) {
+      return res.status(400).json({ error: 'Feedback message is required' })
+    }
+
+    const validCategories = ['bug', 'feature_request', 'general', 'ui/ux']
+    const feedbackCategory = validCategories.includes(category) ? category : 'general'
+
+    const result = await db.prepare(
+      'INSERT INTO feedback (user_id, category, rating, message, contact_email) VALUES (?, ?, ?, ?, ?)'
+    ).run(req.userId, feedbackCategory, rating || null, message.trim(), contact_email?.trim() || null)
+
+    const feedback = await db.prepare(
+      'SELECT id, user_id, category, rating, message, contact_email, created_at FROM feedback WHERE id = ?'
+    ).get(result.lastInsertRowid)
+
+    res.status(201).json({
+      message: 'Thank you for your feedback!',
+      feedback
+    })
+  } catch (err) {
+    console.error('Feedback submission error:', err)
+    res.status(500).json({ error: 'Failed to submit feedback' })
   }
 })
 
