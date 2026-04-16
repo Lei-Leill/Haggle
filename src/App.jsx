@@ -148,6 +148,9 @@ function App() {
         })
       )
       projectCache.invalidate()
+      setActiveProjectId(chat.id)
+      setActiveMode('chat')
+      setMessages([])
     } catch (err) {
       console.error('Failed to create chat', err)
       alert('Failed to create chat')
@@ -367,6 +370,7 @@ function App() {
         <Main
           messages={messages}
           onSendMessage={handleSendMessage}
+          onSelectProject={handleSelectProject}
           isEmpty={messages.length === 0}
           sendLoading={sendLoading}
           chatLoading={chatLoading}

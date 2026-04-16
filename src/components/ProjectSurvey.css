@@ -104,17 +104,25 @@
 }
 
 .project-chat-item {
-  padding: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-secondary);
-  cursor: pointer;
   transition: all 0.15s;
 }
 
 .project-chat-item:hover {
   border-color: var(--accent);
   background: rgba(139, 92, 246, 0.05);
+}
+
+.project-chat-link {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 12px;
+  cursor: pointer;
 }
 
 .project-chat-title {

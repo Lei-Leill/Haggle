@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import * as api from '../api'
 import './ProjectSurvey.css'
 
-export default function ProjectSurvey({ projectId, onSurveyComplete, activeTab, onTabChange }) {
+export default function ProjectSurvey({ projectId, onSurveyComplete, activeTab, onTabChange, onSelectChat }) {
   const [formData, setFormData] = useState({
     item_listing: '',
     listed_price: '',
@@ -92,10 +92,10 @@ export default function ProjectSurvey({ projectId, onSurveyComplete, activeTab, 
           Chats
         </button>
         <button
-          className={`project-survey-tab ${activeTab === 'sources' ? 'active' : ''}`}
-          onClick={() => onTabChange('sources')}
+          className={`project-survey-tab ${activeTab === 'survey' ? 'active' : ''}`}
+          onClick={() => onTabChange('survey')}
         >
-          Sources
+          Survey
         </button>
       </div>
 
@@ -113,10 +113,16 @@ export default function ProjectSurvey({ projectId, onSurveyComplete, activeTab, 
               <ul className="project-chats-list">
                 {chats.map((chat) => (
                   <li key={chat.id} className="project-chat-item">
-                    <div className="project-chat-title">{chat.title}</div>
-                    <div className="project-chat-meta">
-                      {new Date(chat.created_at).toLocaleDateString()}
-                    </div>
+                    <button
+                      type="button"
+                      className="project-chat-link"
+                      onClick={() => onSelectChat?.(chat.id)}
+                    >
+                      <div className="project-chat-title">{chat.title}</div>
+                      <div className="project-chat-meta">
+                        {new Date(chat.created_at).toLocaleDateString()}
+                      </div>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -124,7 +130,7 @@ export default function ProjectSurvey({ projectId, onSurveyComplete, activeTab, 
           </div>
         )}
 
-        {activeTab === 'sources' && (
+        {activeTab === 'survey' && (
           <form onSubmit={handleSubmit} className="project-survey-form">
         <div className="survey-section">
           <label htmlFor="item_listing" className="survey-label">

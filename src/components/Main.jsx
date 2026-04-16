@@ -105,12 +105,12 @@ function MessageContent({ message }) {
   )
 }
 
-export default function Main({ messages, onSendMessage, isEmpty, sendLoading, activeMode, onModeChange, hasProject, activeProjectId, chatLoading, isViewingProject, pagination = { hasMore: false }, onLoadEarlier = () => {} }) {
+export default function Main({ messages, onSendMessage, onSelectProject, isEmpty, sendLoading, activeMode, onModeChange, hasProject, activeProjectId, chatLoading, isViewingProject, pagination = { hasMore: false }, onLoadEarlier = () => {} }) {
   const [input, setInput] = useState('')
   const [sellerInput, setSellerInput] = useState('')
   const [showSurvey, setShowSurvey] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
-  const [surveyActiveTab, setSurveyActiveTab] = useState('sources')
+  const [surveyActiveTab, setSurveyActiveTab] = useState('survey')
   const messagesEndRef = useRef(null)
   const sellerEndRef = useRef(null)
   const inputRef = useRef(null)
@@ -292,6 +292,7 @@ export default function Main({ messages, onSendMessage, isEmpty, sendLoading, ac
             projectId={activeProjectId} 
             activeTab={surveyActiveTab}
             onTabChange={setSurveyActiveTab}
+            onSelectChat={onSelectProject}
             onSurveyComplete={() => setShowSurvey(false)}
           />
         ) : isNegotiationSplit ? (
