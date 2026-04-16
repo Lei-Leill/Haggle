@@ -53,7 +53,11 @@ async function parseResponse(res, fallbackError) {
     throw new Error(data.error || 'Session expired. Please sign in again.')
   }
   if (!res.ok) {
-    throw new Error(data.error || fallbackError)
+    const error = new Error(data.error || fallbackError)
+    error.code = data.code
+    error.status = res.status
+    error.details = data
+    throw error
   }
   return data
 }
@@ -208,6 +212,19 @@ export async function getUserTokens() {
   try {
     const res = await fetch(`${API_BASE}/api/user/tokens`, { headers: getHeaders() })
     return await parseResponse(res, 'Failed to fetch token balance')
+  } catch (err) {
+    throw normalizeError(err)
+  }
+}
+
+export async function requestTokenTrial(email) {
+  try {
+    const res = await fetch(`${API_BASE}/api/token-trial-request`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ email }),
+    })
+    return await parseResponse(res, 'Failed to submit token trial request')
   } catch (err) {
     throw normalizeError(err)
   }

@@ -252,6 +252,9 @@ function App() {
         )
       }
     } catch (err) {
+      if (err?.code === 'TOKENS_EXHAUSTED' || err?.status === 402) {
+        window.dispatchEvent(new CustomEvent('tokens:exhausted'))
+      }
       setMessages((prev) => {
         const withoutLast = prev.slice(0, -1)
         return [...withoutLast, userMessage, { role: 'assistant', content: err.message || 'Failed to get response.' }]

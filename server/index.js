@@ -150,6 +150,55 @@ function extractProviderErrorMessage(err) {
   return candidates.find((v) => typeof v === 'string' && v.trim()) || 'Unknown provider error'
 }
 
+const DEFAULT_FREE_TRIAL_TOKENS = 1000
+const MIN_ESTIMATED_TOKENS_PER_MESSAGE = 20
+const ESTIMATED_IMAGE_TOKENS = 250
+
+async function getOrCreateUserTokens(userId) {
+  let userTokens = await db.prepare('SELECT * FROM user_tokens WHERE user_id = ?').get(userId)
+
+  if (!userTokens) {
+    await db.prepare(
+      'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, is_vip) VALUES (?, ?, ?, ?, ?)'
+    ).run(userId, DEFAULT_FREE_TRIAL_TOKENS, 0, DEFAULT_FREE_TRIAL_TOKENS, 0)
+
+    userTokens = await db.prepare('SELECT * FROM user_tokens WHERE user_id = ?').get(userId)
+  }
+
+  return userTokens
+}
+
+function estimateTextTokens(text = '') {
+  return Math.ceil(String(text).length / 4)
+}
+
+function estimateRequestTokens({ promptText = '', responseText = '', imageCount = 0 }) {
+  const estimated = estimateTextTokens(promptText) + estimateTextTokens(responseText) + (imageCount * ESTIMATED_IMAGE_TOKENS)
+  return Math.max(estimated, MIN_ESTIMATED_TOKENS_PER_MESSAGE)
+}
+
+async function consumeUserTokens(userId, requestedTokens) {
+  const userTokens = await getOrCreateUserTokens(userId)
+  const currentRemaining = Math.max(userTokens.tokens_remaining || 0, 0)
+  const currentUsed = Math.max(userTokens.tokens_used || 0, 0)
+  const tokensToConsume = Math.max(1, Math.floor(requestedTokens || 0))
+  const consumed = Math.min(currentRemaining, tokensToConsume)
+  const nextRemaining = Math.max(currentRemaining - consumed, 0)
+  const nextUsed = currentUsed + consumed
+
+  await db.prepare(
+    'UPDATE user_tokens SET tokens_used = ?, tokens_remaining = ?, updated_at = datetime("now") WHERE user_id = ?'
+  ).run(nextUsed, nextRemaining, userId)
+
+  const updatedTokens = await db.prepare('SELECT * FROM user_tokens WHERE user_id = ?').get(userId)
+  return {
+    consumed,
+    remaining: nextRemaining,
+    exhausted: nextRemaining <= 0,
+    tokens: updatedTokens,
+  }
+}
+
 // ----- Health (no auth) -----
 app.get('/api/health', async (req, res) => {
   try {
@@ -329,7 +378,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
       .run(password_hash, resetToken.user_id)
 
     // Mark token as used
-    await db.prepare('UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?')
+    await db.prepare('UPDATE password_reset_tokens SET used_at = datetime("now") WHERE id = ?')
       .run(resetToken.id)
 
     res.json({ message: 'Password reset successfully' })
@@ -468,7 +517,7 @@ app.patch('/api/chats/:id', authMiddleware, async (req, res) => {
     const existing = await db.prepare('SELECT id FROM chats WHERE id = ? AND user_id = ?').get(req.params.id, req.userId)
     if (!existing) return res.status(404).json({ error: 'Chat not found' })
     if (title !== undefined) {
-      await db.prepare("UPDATE chats SET title = ?, updated_at = NOW() WHERE id = ?").run(title, req.params.id)
+      await db.prepare("UPDATE chats SET title = ?, updated_at = datetime('now') WHERE id = ?").run(title, req.params.id)
     }
     const chat = await db.prepare('SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE id = ?').get(req.params.id)
     res.json(chat)
@@ -508,14 +557,14 @@ app.post('/api/chats/:id/metadata', authMiddleware, async (req, res) => {
       // Update existing record
       await db.prepare(`
         UPDATE project_metadata 
-        SET item_listing = ?, listed_price = ?, target_price = ?, max_price = ?, ideal_extras = ?, urgency = ?, private_notes = ?, seller_type = ?, updated_at = NOW()
+        SET item_listing = ?, listed_price = ?, target_price = ?, max_price = ?, ideal_extras = ?, urgency = ?, private_notes = ?, seller_type = ?, updated_at = datetime('now')
         WHERE chat_id = ?
       `).run(item_listing || null, listed_price || null, target_price || null, max_price || null, ideal_extras || null, urgency || null, private_notes || null, seller_type || null, chatId)
       
       // Auto-update chat title from item_listing if provided
       if (item_listing?.trim()) {
         const titleFromItem = item_listing.slice(0, 60).trim() + (item_listing.length > 60 ? '...' : '')
-        await db.prepare('UPDATE chats SET title = ?, updated_at = NOW() WHERE id = ?').run(titleFromItem, chatId)
+        await db.prepare('UPDATE chats SET title = ?, updated_at = datetime("now") WHERE id = ?').run(titleFromItem, chatId)
       }
       
       const metadata = await db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
@@ -530,7 +579,7 @@ app.post('/api/chats/:id/metadata', authMiddleware, async (req, res) => {
       // Auto-update chat title from item_listing if provided
       if (item_listing?.trim()) {
         const titleFromItem = item_listing.slice(0, 60).trim() + (item_listing.length > 60 ? '...' : '')
-        await db.prepare('UPDATE chats SET title = ?, updated_at = NOW() WHERE id = ?').run(titleFromItem, chatId)
+        await db.prepare('UPDATE chats SET title = ?, updated_at = datetime("now") WHERE id = ?').run(titleFromItem, chatId)
       }
       
       const metadata = await db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
@@ -588,39 +637,12 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
     const chat = await db.prepare('SELECT id, title, parent_id FROM chats WHERE id = ? AND user_id = ?').get(chatId, req.userId)
     if (!chat) return res.status(404).json({ error: 'Chat not found' })
 
-    // ===== Token Check =====
-    let userTokens = await db.prepare(
-      'SELECT tokens_remaining FROM user_tokens WHERE user_id = ?'
-    ).get(req.userId)
-
-    if (!userTokens) {
-      // Create free trial record if missing (handle potential race condition)
-      try {
-        await db.prepare(
-          'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, is_vip) VALUES (?, ?, ?, ?, ?)'
-        ).run(req.userId, 1000, 0, 1000, 0)
-        userTokens = { tokens_remaining: 1000 }
-      } catch (err) {
-        // If insert fails (race condition or already exists), just fetch it
-        userTokens = await db.prepare(
-          'SELECT tokens_remaining FROM user_tokens WHERE user_id = ?'
-        ).get(req.userId) || { tokens_remaining: 1000 }
-      }
-    }
-
-    const estimateTokenUsage = (text) => {
-      if (!text) return 0
-      return Math.max(1, Math.ceil(text.length / 4))
-    }
-
-    const estimatedUserTokens = estimateTokenUsage(content)
-    const currentTokens = userTokens?.tokens_remaining || 1000
-
-    if (currentTokens < estimatedUserTokens) {
+    const userTokens = await getOrCreateUserTokens(req.userId)
+    if ((userTokens.tokens_remaining || 0) <= 0) {
       return res.status(402).json({
-        error: 'Insufficient tokens',
-        tokensNeeded: estimatedUserTokens,
-        tokensRemaining: currentTokens,
+        error: 'You have used all available tokens. Request more trial tokens to continue.',
+        code: 'TOKENS_EXHAUSTED',
+        tokens: userTokens,
       })
     }
 
@@ -649,6 +671,7 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
     const isTinker = llmBaseUrl && llmBaseUrl.includes('tinker')
 
     let assistantContent
+    let providerUsageTokens = null
     let imageFallbackUsed = false
     if (openai) {
       try {
@@ -673,6 +696,7 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
             max_tokens: 1400,
             temperature: 0.7,
           })
+          providerUsageTokens = completion?.usage?.total_tokens || null
           assistantContent = completion.choices[0]?.message?.content?.trim() || 'No response generated.'
         } else {
           const completion = await openai.chat.completions.create({
@@ -683,6 +707,7 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
             ],
             max_tokens: 1400,
           })
+          providerUsageTokens = completion?.usage?.total_tokens || null
           assistantContent = completion.choices[0]?.message?.content?.trim() || 'No response generated.'
         }
       } catch (err) {
@@ -713,32 +738,33 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
             max_tokens: 1400,
             temperature: 0.7,
           })
+          providerUsageTokens = completion?.usage?.total_tokens || null
           assistantContent = completion.choices[0]?.message?.content?.trim() || 'No response generated.'
-        } catch (retryErr) {
+          } catch (retryErr) {
           const retryMsg = extractProviderErrorMessage(retryErr)
           const activeModel = llmModel || modelId || 'unknown-model'
           assistantContent = `⚠️ Vision not supported: Your image couldn't be processed. The model (${activeModel}) may not support base64 images via this provider. Error: ${retryMsg}`
-        }
-      } else {
-        const activeModel = llmModel || modelId || 'unknown-model'
-        if (status === 422 && hasImages) {
-          assistantContent = `⚠️ Vision error: The model (${activeModel}) rejected image input. Possible causes:\n• Model doesn't support data: URLs (embedded base64 images)\n• Tinker API requires publicly accessible image URLs\n• Image format or encoding issue\n\nTry sending text only or check model documentation.`
+          }
         } else {
-          assistantContent = `Tinker API error${status ? ` (${status})` : ''}: ${msg}. Check server console for details.`
+          const activeModel = llmModel || modelId || 'unknown-model'
+          if (status === 422 && hasImages) {
+            assistantContent = `⚠️ Vision error: The model (${activeModel}) rejected image input. Possible causes:\n• Model doesn't support data: URLs (embedded base64 images)\n• Tinker API requires publicly accessible image URLs\n• Image format or encoding issue\n\nTry sending text only or check model documentation.`
+          } else {
+            assistantContent = `Tinker API error${status ? ` (${status})` : ''}: ${msg}. Check server console for details.`
+          }
         }
-      }
 
-      console.error('LLM request summary:', {
-        status,
-        model: llmModel || modelId || 'unknown-model',
-        hasImages,
-        imageCount: sanitizedImages.length,
-        textLength: textContent.length,
-      })
+        console.error('LLM request summary:', {
+          status,
+          model: llmModel || modelId || 'unknown-model',
+          hasImages,
+          imageCount: sanitizedImages.length,
+          textLength: textContent.length,
+        })
+      }
+    } else {
+      assistantContent = 'Haggle AI demo: configure your LLM provider in server/.env (for Tinker, set TINKER_API_KEY and optionally TINKER_BASE_URL / TINKER_MODEL).'
     }
-  } else {
-    assistantContent = 'Haggle AI demo: configure your LLM provider in server/.env (for Tinker, set TINKER_API_KEY and optionally TINKER_BASE_URL / TINKER_MODEL).'
-  }
 
     assistantContent = sanitizeAssistantOutput(assistantContent)
 
@@ -746,20 +772,7 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
       .prepare('INSERT INTO messages (chat_id, role, mode, content) VALUES (?, ?, ?, ?)')
       .run(chatId, 'assistant', mode, assistantContent)
 
-    // ===== Token Deduction =====
-    const userTokenCost = estimateTokenUsage(textContent)
-    const assistantTokenCost = estimateTokenUsage(assistantContent)
-    const totalTokensUsed = userTokenCost + assistantTokenCost
-
-    await db.prepare(`
-      UPDATE user_tokens 
-      SET tokens_used = tokens_used + ?,
-          tokens_remaining = tokens_remaining - ?,
-          updated_at = NOW()
-      WHERE user_id = ?
-    `).run(totalTokensUsed, totalTokensUsed, req.userId)
-
-    await db.prepare("UPDATE chats SET updated_at = NOW() WHERE id = ?").run(chatId)
+    await db.prepare("UPDATE chats SET updated_at = datetime('now') WHERE id = ?").run(chatId)
     
     // Auto-rename ONLY if this is a project (not nested chat) with default title "New project"
     // This only happens for the main project on first use, not for nested chats
@@ -777,12 +790,24 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
       .prepare('SELECT id, role, mode, content, created_at FROM messages WHERE id = ?')
       .get(assistantInsert.lastInsertRowid)
     const updatedChat = await db.prepare('SELECT title FROM chats WHERE id = ?').get(chatId)
+
+    const estimatedTokens = estimateRequestTokens({
+      promptText: textContent,
+      responseText: assistantContent,
+      imageCount: sanitizedImages.length,
+    })
+    const consumedTokenResult = await consumeUserTokens(req.userId, providerUsageTokens || estimatedTokens)
     
     res.status(201).json({
       userMessage: { id: userMsg.id, role: 'user', mode: userMsg.mode, content: userMsg.content, created_at: userMsg.created_at },
       assistantMessage: { id: assistantMsg.id, role: 'assistant', mode: assistantMsg.mode, content: assistantMsg.content, created_at: assistantMsg.created_at },
       mode,
       chatTitle: updatedChat.title,
+      tokenUsage: {
+        used: consumedTokenResult.consumed,
+        exhausted: consumedTokenResult.exhausted,
+        tokens: consumedTokenResult.tokens,
+      },
     })
   } catch (err) {
     console.error(err)
@@ -823,15 +848,19 @@ app.post('/api/auth/redeem-vip-code', authMiddleware, async (req, res) => {
 
     // Mark code as used
     await db.prepare(
-      'UPDATE vip_codes SET is_used = 1, used_by_user_id = ?, used_at = NOW() WHERE id = ?'
+      'UPDATE vip_codes SET is_used = 1, used_by_user_id = ?, used_at = datetime("now") WHERE id = ?'
     ).run(req.userId, vipCode.id)
 
     // Create or update token record
     if (existingTokens) {
       // Update existing (add VIP tokens to balance)
+      const currentTotal = existingTokens.total_tokens || 0
+      const currentRemaining = existingTokens.tokens_remaining || 0
+      const nextTotal = currentTotal + vipCode.token_allowance
+      const nextRemaining = currentRemaining + vipCode.token_allowance
       await db.prepare(
-        'UPDATE user_tokens SET is_vip = 1, vip_code_id = ?, tokens_remaining = tokens_remaining + ?, updated_at = NOW() WHERE user_id = ?'
-      ).run(vipCode.id, vipCode.token_allowance, req.userId)
+        'UPDATE user_tokens SET is_vip = 1, vip_code_id = ?, total_tokens = ?, tokens_remaining = ?, updated_at = datetime("now") WHERE user_id = ?'
+      ).run(vipCode.id, nextTotal, nextRemaining, req.userId)
     } else {
       // Create new VIP token record
       await db.prepare(
@@ -856,24 +885,47 @@ app.post('/api/auth/redeem-vip-code', authMiddleware, async (req, res) => {
 // Get user's token balance
 app.get('/api/user/tokens', authMiddleware, async (req, res) => {
   try {
-    let userTokens = await db.prepare(
-      'SELECT * FROM user_tokens WHERE user_id = ?'
-    ).get(req.userId)
-
-    // If no token record exists, create a free trial record
-    if (!userTokens) {
-      await db.prepare(
-        'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, is_vip) VALUES (?, ?, ?, ?, ?)'
-      ).run(req.userId, 1000, 0, 1000, 0)
-      userTokens = await db.prepare(
-        'SELECT * FROM user_tokens WHERE user_id = ?'
-      ).get(req.userId)
-    }
+    const userTokens = await getOrCreateUserTokens(req.userId)
 
     res.json(userTokens)
   } catch (err) {
     console.error('Get tokens error:', err)
     res.status(500).json({ error: 'Failed to fetch token balance' })
+  }
+})
+
+app.post('/api/token-trial-request', authMiddleware, async (req, res) => {
+  try {
+    const { email } = req.body
+    const normalizedEmail = email?.trim().toLowerCase()
+
+    if (!normalizedEmail || !normalizedEmail.includes('@')) {
+      return res.status(400).json({ error: 'A valid email is required' })
+    }
+
+    const existingPendingRequest = await db.prepare(
+      'SELECT id FROM token_trial_requests WHERE user_id = ? AND status = ?'
+    ).get(req.userId, 'pending')
+
+    if (existingPendingRequest) {
+      return res.status(409).json({ error: 'You already have a pending token trial request' })
+    }
+
+    const result = await db.prepare(
+      'INSERT INTO token_trial_requests (user_id, email, status) VALUES (?, ?, ?)'
+    ).run(req.userId, normalizedEmail, 'pending')
+
+    const request = await db.prepare(
+      'SELECT id, user_id, email, status, created_at FROM token_trial_requests WHERE id = ?'
+    ).get(result.lastInsertRowid)
+
+    res.status(201).json({
+      message: 'Your token trial request has been submitted.',
+      request,
+    })
+  } catch (err) {
+    console.error('Token trial request error:', err)
+    res.status(500).json({ error: 'Failed to submit token trial request' })
   }
 })
 

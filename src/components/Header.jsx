@@ -4,6 +4,7 @@ import { useTheme } from '../context/ThemeContext'
 import * as api from '../api'
 import './Header.css'
 import FeedbackModal from './FeedbackModal'
+import TokenTrialModal from './TokenTrialModal'
 
 const IconMenu = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -82,6 +83,7 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
   const [modelOpen, setModelOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
+  const [showTokenTrialModal, setShowTokenTrialModal] = useState(false)
   const [tokens, setTokens] = useState(null)
   const [tokenLoading, setTokenLoading] = useState(true)
   const modelRef = useRef(null)
@@ -96,10 +98,23 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
     }
   }, [token, messageCount])
 
+  useEffect(() => {
+    function handleTokenExhausted() {
+      setShowTokenTrialModal(true)
+      fetchTokenBalance()
+    }
+
+    window.addEventListener('tokens:exhausted', handleTokenExhausted)
+    return () => window.removeEventListener('tokens:exhausted', handleTokenExhausted)
+  }, [])
+
   const fetchTokenBalance = async () => {
     try {
       const response = await api.getUserTokens()
       setTokens(response)
+      if ((response?.tokens_remaining || 0) <= 0) {
+        setShowTokenTrialModal(true)
+      }
     } catch (err) {
       console.error('Failed to fetch token balance:', err)
       console.error('Token being used:', token)
@@ -120,6 +135,7 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
 
   const currentModelLabel = MODELS.find((m) => m.id === selectedModel)?.label || 'Haggle AI 1.0'
   const tokensRemaining = tokenLoading ? '...' : (tokens?.tokens_remaining || 0)
+  const isOutOfTokens = !tokenLoading && Number(tokensRemaining) <= 0
 
   return (
     <header className="header">
@@ -137,7 +153,18 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
         </button>
       </div>
       <div className="header-center">
-        <div className="header-token-display">
+        <div
+          className={`header-token-display ${isOutOfTokens ? 'header-token-display--empty' : ''}`}
+          role="button"
+          tabIndex={0}
+          onClick={() => isOutOfTokens && setShowTokenTrialModal(true)}
+          onKeyDown={(e) => {
+            if ((e.key === 'Enter' || e.key === ' ') && isOutOfTokens) {
+              e.preventDefault()
+              setShowTokenTrialModal(true)
+            }
+          }}
+        >
           <IconZap />
           <span>{tokensRemaining} tokens remaining</span>
         </div>
@@ -235,6 +262,12 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
         <FeedbackModal 
           onClose={() => setShowFeedback(false)}
           token={token}
+        />
+      )}
+      {showTokenTrialModal && (
+        <TokenTrialModal
+          onClose={() => setShowTokenTrialModal(false)}
+          defaultEmail={user?.email || ''}
         />
       )}
     </header>

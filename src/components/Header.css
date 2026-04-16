@@ -180,6 +180,12 @@
   margin-right: 12px;
 }
 
+.header-token-display--empty {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+  cursor: pointer;
+}
+
 .header-token-display svg {
   width: 16px;
   height: 16px;
