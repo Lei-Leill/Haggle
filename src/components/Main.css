@@ -638,3 +638,107 @@
   object-fit: contain;
   display: block;
 }
+
+@media (max-width: 900px) {
+  .main-content {
+    max-width: 100%;
+    padding: 14px 12px 20px;
+  }
+
+  .main-content--split {
+    padding: 14px 12px 20px;
+  }
+
+  .main-modes {
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .main-mode-btn {
+    white-space: nowrap;
+  }
+
+  .main-greeting {
+    font-size: 26px;
+  }
+
+  .main-sub {
+    font-size: 14px;
+    margin-bottom: 28px;
+  }
+
+  .main-messages {
+    padding: 14px 0;
+  }
+
+  .main-message {
+    margin-bottom: 16px;
+  }
+
+  .main-message-inner {
+    gap: 10px;
+  }
+
+  .main-message-avatar {
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
+  }
+
+  .main-message-text,
+  .main-markdown {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .main-input-wrap {
+    padding: 10px 12px;
+    border-radius: 16px;
+  }
+
+  .main-input-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .main-input,
+  .main-split-input {
+    font-size: 16px;
+  }
+
+  .main-split {
+    gap: 12px;
+  }
+
+  .main-split-panel {
+    padding: 12px;
+  }
+
+  .main-split-use-reply-btn {
+    margin-left: 34px;
+  }
+
+  .main-message-image {
+    max-width: 100%;
+    max-height: 220px;
+  }
+}
+
+@media (max-width: 600px) {
+  .main-content,
+  .main-content--split {
+    padding: 12px 10px 16px;
+  }
+
+  .main-empty {
+    padding: 32px 14px;
+  }
+
+  .main-split-input-row {
+    flex-direction: column;
+  }
+
+  .main-split-btn {
+    width: 100%;
+  }
+}

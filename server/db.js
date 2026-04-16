@@ -132,12 +132,38 @@ async function handleUpdate(sql, params) {
   let paramIdx = 0
 
   for (const part of setParts) {
-    const [col] = part.split('=').map(s => s.trim())
-    if (col === 'updated_at') {
-      row[col] = new Date().toISOString()
-    } else {
+    const [rawCol, rawValue] = part.split('=').map(s => s.trim())
+    const col = rawCol
+    const valueExpr = rawValue || ''
+
+    if (valueExpr === '?') {
       row[col] = params[paramIdx++]
+      continue
     }
+
+    // Map SQL time functions used in app queries to current timestamp.
+    if (col === 'updated_at' || /datetime\s*\(/i.test(valueExpr) || /now\s*\(/i.test(valueExpr)) {
+      row[col] = new Date().toISOString()
+      continue
+    }
+
+    if (/^null$/i.test(valueExpr)) {
+      row[col] = null
+      continue
+    }
+
+    if (/^(true|false)$/i.test(valueExpr)) {
+      row[col] = /^true$/i.test(valueExpr)
+      continue
+    }
+
+    if (/^-?\d+(?:\.\d+)?$/.test(valueExpr)) {
+      row[col] = Number(valueExpr)
+      continue
+    }
+
+    // Fall back to raw literal without surrounding quotes.
+    row[col] = valueExpr.replace(/^['"]|['"]$/g, '')
   }
 
   // Parse WHERE clause - usually just "id = ?"

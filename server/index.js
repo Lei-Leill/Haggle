@@ -825,9 +825,11 @@ app.post('/api/auth/redeem-vip-code', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'VIP code is required' })
     }
 
+    const normalizedCode = code.trim().toUpperCase()
+
     const vipCode = await db.prepare(
-      'SELECT id, token_allowance, is_used, used_by_user_id FROM vip_codes WHERE LOWER(code) = LOWER(?)'
-    ).get(code.trim())
+      'SELECT id, token_allowance, is_used, used_by_user_id FROM vip_codes WHERE code = ?'
+    ).get(normalizedCode)
 
     if (!vipCode) {
       return res.status(404).json({ error: 'VIP code not found' })
@@ -839,7 +841,7 @@ app.post('/api/auth/redeem-vip-code', authMiddleware, async (req, res) => {
 
     // Check if user already has VIP status
     const existingTokens = await db.prepare(
-      'SELECT id, is_vip, tokens_remaining FROM user_tokens WHERE user_id = ?'
+      'SELECT id, is_vip, total_tokens, tokens_remaining FROM user_tokens WHERE user_id = ?'
     ).get(req.userId)
 
     if (existingTokens && existingTokens.is_vip) {

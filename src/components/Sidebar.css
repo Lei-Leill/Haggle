@@ -365,3 +365,26 @@
 .sidebar-chevron svg {
   transform: rotate(180deg);
 }
+
+@media (max-width: 900px) {
+  .sidebar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(86vw, 320px);
+    z-index: 120;
+    box-shadow: 10px 0 30px rgba(0, 0, 0, 0.35);
+  }
+
+  .sidebar-new-chat,
+  .sidebar-search,
+  .sidebar-nav-item,
+  .sidebar-chat-item {
+    font-size: 15px;
+  }
+
+  .sidebar-action-btn {
+    opacity: 1;
+  }
+}

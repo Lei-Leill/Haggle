@@ -13,7 +13,12 @@ function App() {
   const { user, loading } = useAuth()
   const [authMode, setAuthMode] = useState('login') // 'login' | 'register'
 
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 900px)').matches : false
+  )
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window !== 'undefined' ? !window.matchMedia('(max-width: 900px)').matches : true
+  )
   const [projects, setProjects] = useState([])
   const [activeProjectId, setActiveProjectId] = useState(null)
   const [activeMode, setActiveMode] = useState('chat')
@@ -91,10 +96,11 @@ function App() {
       setActiveProjectId(project.id)
       setActiveMode('chat')
       setMessages([])
+      if (isMobile) setSidebarOpen(false)
     } catch (err) {
       console.error('Failed to create project', err)
     }
-  }, [])
+  }, [isMobile])
 
   const handleDeleteProject = useCallback(async (projectId) => {
     try {
@@ -184,7 +190,8 @@ function App() {
   const handleSelectProject = useCallback((id) => {
     if (id === activeProjectId) return
     setActiveProjectId(id)
-  }, [activeProjectId])
+    if (isMobile) setSidebarOpen(false)
+  }, [activeProjectId, isMobile])
 
   const handleModeChange = useCallback((mode) => {
     setActiveMode(mode)
@@ -279,6 +286,24 @@ function App() {
     setMessages([])
   }, [user])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const media = window.matchMedia('(max-width: 900px)')
+    const handleChange = (event) => {
+      setIsMobile(event.matches)
+      setSidebarOpen(!event.matches)
+    }
+
+    handleChange(media)
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', handleChange)
+      return () => media.removeEventListener('change', handleChange)
+    }
+
+    media.addListener(handleChange)
+    return () => media.removeListener(handleChange)
+  }, [])
+
   // Determine if currently viewing a project (not a chat within a project)
   const isViewingProject = useCallback(() => {
     if (!activeProjectId) return false
@@ -354,6 +379,14 @@ function App() {
         messageCount={messages.length}
       />
       <div className="app-body">
+        {isMobile && sidebarOpen && (
+          <button
+            type="button"
+            className="app-sidebar-backdrop"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close sidebar"
+          />
+        )}
         <Sidebar
           isOpen={sidebarOpen}
           projects={projects}
