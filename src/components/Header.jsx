@@ -112,9 +112,6 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
     try {
       const response = await api.getUserTokens()
       setTokens(response)
-      if ((response?.tokens_remaining || 0) <= 0) {
-        setShowTokenTrialModal(true)
-      }
     } catch (err) {
       console.error('Failed to fetch token balance:', err)
       console.error('Token being used:', token)

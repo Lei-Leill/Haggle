@@ -826,8 +826,8 @@ app.post('/api/auth/redeem-vip-code', authMiddleware, async (req, res) => {
     }
 
     const vipCode = await db.prepare(
-      'SELECT id, token_allowance, is_used, used_by_user_id FROM vip_codes WHERE code = ?'
-    ).get(code.trim().toUpperCase())
+      'SELECT id, token_allowance, is_used, used_by_user_id FROM vip_codes WHERE LOWER(code) = LOWER(?)'
+    ).get(code.trim())
 
     if (!vipCode) {
       return res.status(404).json({ error: 'VIP code not found' })

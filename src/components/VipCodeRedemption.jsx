@@ -13,12 +13,18 @@ export default function VipCodeRedemption({ onSuccess, onCancel }) {
       return
     }
 
+    const authToken = localStorage.getItem('haggle_token')
+    if (!authToken) {
+      setError('Please sign in first, then redeem your VIP code.')
+      return
+    }
+
     setLoading(true)
     setError('')
     try {
       const response = await axios.post('/api/auth/redeem-vip-code', 
         { code: code.trim() },
-        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+        { headers: { Authorization: `Bearer ${authToken}` } }
       )
       setSuccess(true)
       setTimeout(() => {
@@ -51,7 +57,7 @@ export default function VipCodeRedemption({ onSuccess, onCancel }) {
           type="text"
           placeholder="Haggle-XXXX"
           value={code}
-          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          onChange={(e) => setCode(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && handleRedeem()}
           style={styles.input}
           disabled={loading}
