@@ -5,6 +5,7 @@ import * as api from '../api'
 import './Header.css'
 import FeedbackModal from './FeedbackModal'
 import TokenTrialModal from './TokenTrialModal'
+import VipCodeRedemption from './VipCodeRedemption'
 
 const IconMenu = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -84,6 +85,7 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
   const [showTokenTrialModal, setShowTokenTrialModal] = useState(false)
+  const [showVipRedemption, setShowVipRedemption] = useState(false)
   const [tokens, setTokens] = useState(null)
   const [tokenLoading, setTokenLoading] = useState(true)
   const modelRef = useRef(null)
@@ -243,6 +245,17 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
             </button>
             <button
               type="button"
+              className="header-user-menu-item"
+              onClick={() => {
+                setShowVipRedemption(true)
+                setUserMenuOpen(false)
+              }}
+            >
+              <IconZap />
+              Redeem VIP Code
+            </button>
+            <button
+              type="button"
               className="header-user-menu-item header-user-menu-item--danger"
               onClick={() => {
                 logout()
@@ -265,6 +278,15 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
         <TokenTrialModal
           onClose={() => setShowTokenTrialModal(false)}
           defaultEmail={user?.email || ''}
+        />
+      )}
+      {showVipRedemption && (
+        <VipCodeRedemption
+          onSuccess={() => {
+            setShowVipRedemption(false)
+            fetchTokenBalance()
+          }}
+          onCancel={() => setShowVipRedemption(false)}
         />
       )}
     </header>
