@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import axios from 'axios'
+import * as api from '../api'
 
 export default function VipCodeRedemption({ onSuccess, onCancel }) {
   const [code, setCode] = useState('')
@@ -22,16 +22,13 @@ export default function VipCodeRedemption({ onSuccess, onCancel }) {
     setLoading(true)
     setError('')
     try {
-      const response = await axios.post('/api/auth/redeem-vip-code', 
-        { code: code.trim() },
-        { headers: { Authorization: `Bearer ${authToken}` } }
-      )
+      const response = await api.redeemVipCode(code.trim())
       setSuccess(true)
       setTimeout(() => {
-        onSuccess?.(response.data.tokens)
+        onSuccess?.(response.tokens)
       }, 1500)
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to redeem VIP code')
+      setError(err.message || 'Failed to redeem VIP code')
     } finally {
       setLoading(false)
     }

@@ -230,6 +230,19 @@ export async function requestTokenTrial(email) {
   }
 }
 
+export async function redeemVipCode(code) {
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/redeem-vip-code`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ code }),
+    })
+    return await parseResponse(res, 'Failed to redeem VIP code')
+  } catch (err) {
+    throw normalizeError(err)
+  }
+}
+
 export function setToken(token) {
   if (token) localStorage.setItem('haggle_token', token)
   else localStorage.removeItem('haggle_token')
