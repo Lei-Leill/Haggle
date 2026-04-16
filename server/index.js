@@ -150,13 +150,6 @@ function extractProviderErrorMessage(err) {
   return candidates.find((v) => typeof v === 'string' && v.trim()) || 'Unknown provider error'
 }
 
-// ===== Token Calculation =====
-// Rough estimation: ~1 token per 4 characters (OpenAI standard)
-function estimateTokenUsage(text) {
-  if (!text) return 0
-  return Math.max(1, Math.ceil(text.length / 4))
-}
-
 // ----- Health (no auth) -----
 app.get('/api/health', async (req, res) => {
   try {
@@ -336,7 +329,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
       .run(password_hash, resetToken.user_id)
 
     // Mark token as used
-    await db.prepare('UPDATE password_reset_tokens SET used_at = datetime("now") WHERE id = ?')
+    await db.prepare('UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?')
       .run(resetToken.id)
 
     res.json({ message: 'Password reset successfully' })
@@ -522,7 +515,7 @@ app.post('/api/chats/:id/metadata', authMiddleware, async (req, res) => {
       // Auto-update chat title from item_listing if provided
       if (item_listing?.trim()) {
         const titleFromItem = item_listing.slice(0, 60).trim() + (item_listing.length > 60 ? '...' : '')
-        await db.prepare('UPDATE chats SET title = ?, updated_at = datetime("now") WHERE id = ?').run(titleFromItem, chatId)
+        await db.prepare('UPDATE chats SET title = ?, updated_at = NOW() WHERE id = ?').run(titleFromItem, chatId)
       }
       
       const metadata = await db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
@@ -537,7 +530,7 @@ app.post('/api/chats/:id/metadata', authMiddleware, async (req, res) => {
       // Auto-update chat title from item_listing if provided
       if (item_listing?.trim()) {
         const titleFromItem = item_listing.slice(0, 60).trim() + (item_listing.length > 60 ? '...' : '')
-        await db.prepare('UPDATE chats SET title = ?, updated_at = datetime("now") WHERE id = ?').run(titleFromItem, chatId)
+        await db.prepare('UPDATE chats SET title = ?, updated_at = NOW() WHERE id = ?').run(titleFromItem, chatId)
       }
       
       const metadata = await db.prepare('SELECT * FROM project_metadata WHERE chat_id = ?').get(chatId)
@@ -613,6 +606,11 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
           'SELECT tokens_remaining FROM user_tokens WHERE user_id = ?'
         ).get(req.userId) || { tokens_remaining: 1000 }
       }
+    }
+
+    const estimateTokenUsage = (text) => {
+      if (!text) return 0
+      return Math.max(1, Math.ceil(text.length / 4))
     }
 
     const estimatedUserTokens = estimateTokenUsage(content)
@@ -825,14 +823,14 @@ app.post('/api/auth/redeem-vip-code', authMiddleware, async (req, res) => {
 
     // Mark code as used
     await db.prepare(
-      'UPDATE vip_codes SET is_used = 1, used_by_user_id = ?, used_at = datetime("now") WHERE id = ?'
+      'UPDATE vip_codes SET is_used = 1, used_by_user_id = ?, used_at = NOW() WHERE id = ?'
     ).run(req.userId, vipCode.id)
 
     // Create or update token record
     if (existingTokens) {
       // Update existing (add VIP tokens to balance)
       await db.prepare(
-        'UPDATE user_tokens SET is_vip = 1, vip_code_id = ?, tokens_remaining = tokens_remaining + ?, updated_at = datetime("now") WHERE user_id = ?'
+        'UPDATE user_tokens SET is_vip = 1, vip_code_id = ?, tokens_remaining = tokens_remaining + ?, updated_at = NOW() WHERE user_id = ?'
       ).run(vipCode.id, vipCode.token_allowance, req.userId)
     } else {
       // Create new VIP token record
@@ -906,220 +904,6 @@ app.post('/api/feedback', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Feedback submission error:', err)
     res.status(500).json({ error: 'Failed to submit feedback' })
-  }
-})
-
-// Request additional tokens (when user runs out)
-app.post('/api/request-tokens', authMiddleware, async (req, res) => {
-  try {
-    const { email } = req.body
-
-    if (!email?.trim()) {
-      return res.status(400).json({ error: 'Email is required' })
-    }
-
-    // Check if user already has a pending request
-    const existingRequest = await db.prepare(
-      'SELECT id FROM token_requests WHERE user_id = ? AND status = ?'
-    ).get(req.userId, 'pending')
-
-    if (existingRequest) {
-      return res.status(400).json({ error: 'You already have a pending token request' })
-    }
-
-    const result = await db.prepare(
-      'INSERT INTO token_requests (user_id, email, status, created_at, updated_at) VALUES (?, ?, ?, datetime("now"), datetime("now"))'
-    ).run(req.userId, email.trim().toLowerCase(), 'pending')
-
-    const request = await db.prepare(
-      'SELECT id, user_id, email, status, created_at FROM token_requests WHERE id = ?'
-    ).get(result.lastInsertRowid)
-
-    // In production, send an email notification here to admins
-    // await sendAdminNotificationEmail(email, req.userId)
-
-    res.status(201).json({
-      message: 'Thank you! Your token request has been received. We will review it shortly.',
-      request
-    })
-  } catch (err) {
-    console.error('Token request error:', err)
-    res.status(500).json({ error: 'Failed to submit token request' })
-  }
-})
-
-// ----- Admin Token Management (protected) -----
-// Simple admin check - in production, use a proper role/permission system
-function isAdmin(req) {
-  const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
-  // Get user email from auth token (set by authMiddleware as req.userEmail)
-  const userEmail = req.userEmail || ''
-  return adminEmails.length === 0 || adminEmails.includes(userEmail.toLowerCase())
-}
-
-// Admin: List all token requests (with filtering)
-app.get('/api/admin/token-requests', authMiddleware, async (req, res) => {
-  try {
-    if (!isAdmin(req)) {
-      return res.status(403).json({ error: 'Unauthorized - admin access required' })
-    }
-
-    const { status = 'pending', limit = 50, offset = 0 } = req.query
-    
-    let query = 'SELECT id, user_id, email, status, tokens_granted, grant_reason, created_at, updated_at FROM token_requests'
-    const params = []
-    
-    if (status && status !== 'all') {
-      query += ' WHERE status = ?'
-      params.push(status)
-    }
-    
-    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
-    params.push(parseInt(limit) || 50, parseInt(offset) || 0)
-    
-    const requests = await db.prepare(query).all(...params)
-    
-    // Get total count
-    let countQuery = 'SELECT COUNT(*) as total FROM token_requests'
-    const countParams = []
-    if (status && status !== 'all') {
-      countQuery += ' WHERE status = ?'
-      countParams.push(status)
-    }
-    const { total } = await db.prepare(countQuery).get(...countParams)
-    
-    res.json({
-      requests,
-      pagination: {
-        total,
-        limit: parseInt(limit) || 50,
-        offset: parseInt(offset) || 0,
-        hasMore: parseInt(offset) + parseInt(limit) < total
-      }
-    })
-  } catch (err) {
-    console.error('Get token requests error:', err)
-    res.status(500).json({ error: 'Failed to fetch token requests' })
-  }
-})
-
-// Admin: Approve a token request
-app.post('/api/admin/approve-token-request', authMiddleware, async (req, res) => {
-  try {
-    if (!isAdmin(req)) {
-      return res.status(403).json({ error: 'Unauthorized - admin access required' })
-    }
-
-    const { requestId, tokensToGrant = 5000, reason = 'Approved by admin' } = req.body
-
-    if (!requestId) {
-      return res.status(400).json({ error: 'Request ID is required' })
-    }
-
-    if (tokensToGrant <= 0) {
-      return res.status(400).json({ error: 'Tokens to grant must be greater than 0' })
-    }
-
-    // Get the token request
-    const tokenRequest = await db.prepare(
-      'SELECT id, user_id, status FROM token_requests WHERE id = ?'
-    ).get(requestId)
-
-    if (!tokenRequest) {
-      return res.status(404).json({ error: 'Token request not found' })
-    }
-
-    if (tokenRequest.status !== 'pending') {
-      return res.status(400).json({ error: `Request is already ${tokenRequest.status}` })
-    }
-
-    // Approve the request
-    await db.prepare(`
-      UPDATE token_requests 
-      SET status = 'approved', 
-          tokens_granted = ?,
-          grant_reason = ?,
-          updated_at = NOW()
-      WHERE id = ?
-    `).run(tokensToGrant, reason, requestId)
-
-    // Credit tokens to user
-    await db.prepare(`
-      UPDATE user_tokens 
-      SET tokens_remaining = tokens_remaining + ?,
-          total_tokens = total_tokens + ?,
-          updated_at = NOW()
-      WHERE user_id = ?
-    `).run(tokensToGrant, tokensToGrant, tokenRequest.user_id)
-
-    // Get updated request
-    const updatedRequest = await db.prepare(
-      'SELECT id, user_id, email, status, tokens_granted, grant_reason, created_at, updated_at FROM token_requests WHERE id = ?'
-    ).get(requestId)
-
-    // Get updated user tokens
-    const userTokens = await db.prepare(
-      'SELECT tokens_remaining, total_tokens FROM user_tokens WHERE user_id = ?'
-    ).get(tokenRequest.user_id)
-
-    res.json({
-      message: `Token request approved! Granted ${tokensToGrant} tokens to user.`,
-      request: updatedRequest,
-      userTokens
-    })
-  } catch (err) {
-    console.error('Approve token request error:', err)
-    res.status(500).json({ error: 'Failed to approve token request' })
-  }
-})
-
-// Admin: Reject a token request
-app.post('/api/admin/reject-token-request', authMiddleware, async (req, res) => {
-  try {
-    if (!isAdmin(req)) {
-      return res.status(403).json({ error: 'Unauthorized - admin access required' })
-    }
-
-    const { requestId, reason = 'Request denied' } = req.body
-
-    if (!requestId) {
-      return res.status(400).json({ error: 'Request ID is required' })
-    }
-
-    // Get the token request
-    const tokenRequest = await db.prepare(
-      'SELECT id, status FROM token_requests WHERE id = ?'
-    ).get(requestId)
-
-    if (!tokenRequest) {
-      return res.status(404).json({ error: 'Token request not found' })
-    }
-
-    if (tokenRequest.status !== 'pending') {
-      return res.status(400).json({ error: `Request is already ${tokenRequest.status}` })
-    }
-
-    // Reject the request
-    await db.prepare(`
-      UPDATE token_requests 
-      SET status = 'rejected', 
-          grant_reason = ?,
-          updated_at = NOW()
-      WHERE id = ?
-    `).run(reason, requestId)
-
-    // Get updated request
-    const updatedRequest = await db.prepare(
-      'SELECT id, user_id, email, status, tokens_granted, grant_reason, created_at, updated_at FROM token_requests WHERE id = ?'
-    ).get(requestId)
-
-    res.json({
-      message: 'Token request rejected.',
-      request: updatedRequest
-    })
-  } catch (err) {
-    console.error('Reject token request error:', err)
-    res.status(500).json({ error: 'Failed to reject token request' })
   }
 })
 
