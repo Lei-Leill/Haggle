@@ -213,6 +213,56 @@ export async function getUserTokens() {
   }
 }
 
+export async function requestTokens(email) {
+  try {
+    const res = await fetch(`${API_BASE}/api/request-tokens`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ email }),
+    })
+    return await parseResponse(res, 'Failed to submit token request')
+  } catch (err) {
+    throw normalizeError(err)
+  }
+}
+
+// Admin functions for token request management
+export async function getTokenRequests(status = 'pending', limit = 50, offset = 0) {
+  try {
+    const query = `?status=${encodeURIComponent(status)}&limit=${limit}&offset=${offset}`
+    const res = await fetch(`${API_BASE}/api/admin/token-requests${query}`, { headers: getHeaders() })
+    return await parseResponse(res, 'Failed to fetch token requests')
+  } catch (err) {
+    throw normalizeError(err)
+  }
+}
+
+export async function approveTokenRequest(requestId, tokensToGrant = 5000, reason = 'Approved by admin') {
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/approve-token-request`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ requestId, tokensToGrant, reason }),
+    })
+    return await parseResponse(res, 'Failed to approve token request')
+  } catch (err) {
+    throw normalizeError(err)
+  }
+}
+
+export async function rejectTokenRequest(requestId, reason = 'Request denied') {
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/reject-token-request`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ requestId, reason }),
+    })
+    return await parseResponse(res, 'Failed to reject token request')
+  } catch (err) {
+    throw normalizeError(err)
+  }
+}
+
 export function setToken(token) {
   if (token) localStorage.setItem('haggle_token', token)
   else localStorage.removeItem('haggle_token')

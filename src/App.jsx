@@ -5,6 +5,7 @@ import { messageCache, projectCache, metadataCache, clearAllCaches } from './cac
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import Main from './components/Main'
+import TokenDepletionModal from './components/TokenDepletionModal'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import './App.css'
@@ -23,6 +24,7 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('gpt-4o-mini')
   const [pagination, setPagination] = useState({ limit: 50, offset: 0, total: 0, hasMore: false })
   const [loadError, setLoadError] = useState(null)
+  const [showTokenDepletionModal, setShowTokenDepletionModal] = useState(false)
 
   const loadProjects = useCallback(async () => {
     if (!user) return
@@ -252,10 +254,17 @@ function App() {
         )
       }
     } catch (err) {
-      setMessages((prev) => {
-        const withoutLast = prev.slice(0, -1)
-        return [...withoutLast, userMessage, { role: 'assistant', content: err.message || 'Failed to get response.' }]
-      })
+      // Check if it's a token depletion error
+      if (err.message?.includes('Insufficient tokens')) {
+        setShowTokenDepletionModal(true)
+        // Remove the user message that was added
+        setMessages((prev) => prev.slice(0, -1))
+      } else {
+        setMessages((prev) => {
+          const withoutLast = prev.slice(0, -1)
+          return [...withoutLast, userMessage, { role: 'assistant', content: err.message || 'Failed to get response.' }]
+        })
+      }
     } finally {
       setSendLoading(false)
     }
@@ -376,6 +385,12 @@ function App() {
           onLoadEarlier={handleLoadEarlierMessages}
         />
       </div>
+      {showTokenDepletionModal && (
+        <TokenDepletionModal
+          onClose={() => setShowTokenDepletionModal(false)}
+          token={localStorage.getItem('haggle_token')}
+        />
+      )}
     </div>
   )
 }
