@@ -475,7 +475,7 @@ app.patch('/api/chats/:id', authMiddleware, async (req, res) => {
     const existing = await db.prepare('SELECT id FROM chats WHERE id = ? AND user_id = ?').get(req.params.id, req.userId)
     if (!existing) return res.status(404).json({ error: 'Chat not found' })
     if (title !== undefined) {
-      await db.prepare("UPDATE chats SET title = ?, updated_at = datetime('now') WHERE id = ?").run(title, req.params.id)
+      await db.prepare("UPDATE chats SET title = ?, updated_at = NOW() WHERE id = ?").run(title, req.params.id)
     }
     const chat = await db.prepare('SELECT id, title, category, parent_id, created_at, updated_at FROM chats WHERE id = ?').get(req.params.id)
     res.json(chat)
@@ -515,7 +515,7 @@ app.post('/api/chats/:id/metadata', authMiddleware, async (req, res) => {
       // Update existing record
       await db.prepare(`
         UPDATE project_metadata 
-        SET item_listing = ?, listed_price = ?, target_price = ?, max_price = ?, ideal_extras = ?, urgency = ?, private_notes = ?, seller_type = ?, updated_at = datetime('now')
+        SET item_listing = ?, listed_price = ?, target_price = ?, max_price = ?, ideal_extras = ?, urgency = ?, private_notes = ?, seller_type = ?, updated_at = NOW()
         WHERE chat_id = ?
       `).run(item_listing || null, listed_price || null, target_price || null, max_price || null, ideal_extras || null, urgency || null, private_notes || null, seller_type || null, chatId)
       
@@ -757,11 +757,11 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
       UPDATE user_tokens 
       SET tokens_used = tokens_used + ?,
           tokens_remaining = tokens_remaining - ?,
-          updated_at = datetime('now')
+          updated_at = NOW()
       WHERE user_id = ?
     `).run(totalTokensUsed, totalTokensUsed, req.userId)
 
-    await db.prepare("UPDATE chats SET updated_at = datetime('now') WHERE id = ?").run(chatId)
+    await db.prepare("UPDATE chats SET updated_at = NOW() WHERE id = ?").run(chatId)
     
     // Auto-rename ONLY if this is a project (not nested chat) with default title "New project"
     // This only happens for the main project on first use, not for nested chats
@@ -1039,7 +1039,7 @@ app.post('/api/admin/approve-token-request', authMiddleware, async (req, res) =>
       SET status = 'approved', 
           tokens_granted = ?,
           grant_reason = ?,
-          updated_at = datetime('now')
+          updated_at = NOW()
       WHERE id = ?
     `).run(tokensToGrant, reason, requestId)
 
@@ -1048,7 +1048,7 @@ app.post('/api/admin/approve-token-request', authMiddleware, async (req, res) =>
       UPDATE user_tokens 
       SET tokens_remaining = tokens_remaining + ?,
           total_tokens = total_tokens + ?,
-          updated_at = datetime('now')
+          updated_at = NOW()
       WHERE user_id = ?
     `).run(tokensToGrant, tokensToGrant, tokenRequest.user_id)
 
@@ -1104,7 +1104,7 @@ app.post('/api/admin/reject-token-request', authMiddleware, async (req, res) => 
       UPDATE token_requests 
       SET status = 'rejected', 
           grant_reason = ?,
-          updated_at = datetime('now')
+          updated_at = NOW()
       WHERE id = ?
     `).run(reason, requestId)
 
