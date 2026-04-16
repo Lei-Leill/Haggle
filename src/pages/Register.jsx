@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import VipCodeRedemption from '../components/VipCodeRedemption'
 import './Auth.css'
 
 export default function Register({ onSwitchToLogin }) {
@@ -9,9 +8,9 @@ export default function Register({ onSwitchToLogin }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [vipCode, setVipCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [showVipRedemption, setShowVipRedemption] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -26,7 +25,7 @@ export default function Register({ onSwitchToLogin }) {
     }
     setLoading(true)
     try {
-      await register(email, password, name)
+      await register(email, password, name, vipCode)
     } catch (err) {
       setError(err.message || 'Registration failed')
     } finally {
@@ -86,6 +85,18 @@ export default function Register({ onSwitchToLogin }) {
               autoComplete="new-password"
             />
           </label>
+          <label className="auth-label">
+            VIP code (optional)
+            <input
+              type="text"
+              className="auth-input auth-input-mono"
+              value={vipCode}
+              onChange={(e) => setVipCode(e.target.value.toUpperCase())}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="Haggle-XXXX"
+            />
+          </label>
           <button type="submit" className="auth-submit" disabled={loading}>
             {loading ? 'Creating account…' : 'Create account'}
           </button>
@@ -96,24 +107,7 @@ export default function Register({ onSwitchToLogin }) {
             Sign in
           </button>
         </p>
-        <div className="auth-divider">or</div>
-        <button 
-          type="button" 
-          className="auth-vip-btn"
-          onClick={() => setShowVipRedemption(true)}
-        >
-          Have a VIP code? Redeem it
-        </button>
       </div>
-      {showVipRedemption && (
-        <VipCodeRedemption 
-          onSuccess={() => {
-            setShowVipRedemption(false)
-            window.location.href = '/'
-          }}
-          onCancel={() => setShowVipRedemption(false)}
-        />
-      )}
     </div>
   )
 }

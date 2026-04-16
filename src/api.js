@@ -62,12 +62,12 @@ async function parseResponse(res, fallbackError) {
   return data
 }
 
-export async function register({ email, password, name }) {
+export async function register({ email, password, name, vipCode }) {
   try {
     const res = await fetch(`${API_BASE}/api/auth/register`, {
       method: 'POST',
       headers: getHeaders(false),
-      body: JSON.stringify({ email, password, name }),
+      body: JSON.stringify({ email, password, name, vipCode }),
     })
     return await parseResponse(res, 'Registration failed')
   } catch (err) {

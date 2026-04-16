@@ -167,6 +167,14 @@ export default function Header({ onMenuClick, user, selectedModel, onSelectModel
           <IconZap />
           <span>{tokensRemaining} tokens remaining</span>
         </div>
+        <button
+          type="button"
+          className="header-redeem-btn"
+          onClick={() => setShowVipRedemption(true)}
+          aria-label="Redeem VIP code"
+        >
+          Redeem code
+        </button>
         <div className="header-model-wrap" ref={modelRef}>
           <button
             type="button"

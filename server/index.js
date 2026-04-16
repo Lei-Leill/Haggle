@@ -199,6 +199,66 @@ async function consumeUserTokens(userId, requestedTokens) {
   }
 }
 
+async function redeemVipCodeForUser(userId, code) {
+  if (!code?.trim()) {
+    const err = new Error('VIP code is required')
+    err.status = 400
+    throw err
+  }
+
+  const normalizedCode = code.trim().toUpperCase()
+
+  const vipCode = await db.prepare(
+    'SELECT id, token_allowance, is_used, used_by_user_id FROM vip_codes WHERE code = ?'
+  ).get(normalizedCode)
+
+  if (!vipCode) {
+    const err = new Error('VIP code not found')
+    err.status = 404
+    throw err
+  }
+
+  if (vipCode.is_used) {
+    const err = new Error('This VIP code has already been used')
+    err.status = 400
+    throw err
+  }
+
+  const existingTokens = await db.prepare(
+    'SELECT id, is_vip, total_tokens, tokens_remaining FROM user_tokens WHERE user_id = ?'
+  ).get(userId)
+
+  if (existingTokens && existingTokens.is_vip) {
+    const err = new Error('Your account already has VIP access')
+    err.status = 400
+    throw err
+  }
+
+  await db.prepare(
+    'UPDATE vip_codes SET is_used = 1, used_by_user_id = ?, used_at = datetime("now") WHERE id = ?'
+  ).run(userId, vipCode.id)
+
+  if (existingTokens) {
+    const currentTotal = existingTokens.total_tokens || 0
+    const currentRemaining = existingTokens.tokens_remaining || 0
+    const nextTotal = currentTotal + vipCode.token_allowance
+    const nextRemaining = currentRemaining + vipCode.token_allowance
+    await db.prepare(
+      'UPDATE user_tokens SET is_vip = 1, vip_code_id = ?, total_tokens = ?, tokens_remaining = ?, updated_at = datetime("now") WHERE user_id = ?'
+    ).run(vipCode.id, nextTotal, nextRemaining, userId)
+  } else {
+    await db.prepare(
+      'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, vip_code_id, is_vip) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(userId, vipCode.token_allowance, 0, vipCode.token_allowance, vipCode.id, 1)
+  }
+
+  const updatedTokens = await db.prepare(
+    'SELECT * FROM user_tokens WHERE user_id = ?'
+  ).get(userId)
+
+  return updatedTokens
+}
+
 // ----- Health (no auth) -----
 app.get('/api/health', async (req, res) => {
   try {
@@ -218,7 +278,7 @@ app.get('/api/health', async (req, res) => {
 // ----- Auth -----
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
-    const { email, password, name } = req.body
+    const { email, password, name, vipCode } = req.body
     if (!email?.trim() || !password || !name?.trim()) {
       return res.status(400).json({ error: 'Email, password, and name are required' })
     }
@@ -226,16 +286,40 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     if (existing) {
       return res.status(400).json({ error: 'Email already registered' })
     }
+
+    let createdUserId = null
+
     const password_hash = await bcrypt.hash(password, 10)
     const result = await db.prepare(
       'INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)'
     ).run(email.trim().toLowerCase(), password_hash, name.trim())
+    createdUserId = result.lastInsertRowid
+
     const user = await db.prepare('SELECT id, email, name FROM users WHERE id = ?').get(result.lastInsertRowid)
-    
+
     // Create free trial token record (1000 tokens for new users)
     await db.prepare(
       'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, is_vip) VALUES (?, ?, ?, ?, ?)'
     ).run(user.id, 1000, 0, 1000, 0)
+
+    if (vipCode?.trim()) {
+      try {
+        await redeemVipCodeForUser(user.id, vipCode)
+      } catch (vipErr) {
+        // Best-effort cleanup so failed VIP redemption does not leave a partially created account.
+        const normalizedVipCode = vipCode.trim().toUpperCase()
+
+        await db.prepare(
+          'UPDATE vip_codes SET is_used = 0, used_by_user_id = NULL, used_at = NULL WHERE code = ? AND used_by_user_id = ?'
+        ).run(normalizedVipCode, createdUserId)
+
+        if (createdUserId) {
+          await db.prepare('DELETE FROM user_tokens WHERE user_id = ?').run(createdUserId)
+          await db.prepare('DELETE FROM users WHERE id = ?').run(createdUserId)
+        }
+        return res.status(vipErr.status || 400).json({ error: vipErr.message || 'Failed to redeem VIP code' })
+      }
+    }
     
     const token = signToken({ userId: user.id, email: user.email })
     res.json({ user: { id: user.id, email: user.email, name: user.name }, token })
@@ -821,58 +905,7 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
 app.post('/api/auth/redeem-vip-code', authMiddleware, async (req, res) => {
   try {
     const { code } = req.body
-    if (!code?.trim()) {
-      return res.status(400).json({ error: 'VIP code is required' })
-    }
-
-    const normalizedCode = code.trim().toUpperCase()
-
-    const vipCode = await db.prepare(
-      'SELECT id, token_allowance, is_used, used_by_user_id FROM vip_codes WHERE code = ?'
-    ).get(normalizedCode)
-
-    if (!vipCode) {
-      return res.status(404).json({ error: 'VIP code not found' })
-    }
-
-    if (vipCode.is_used) {
-      return res.status(400).json({ error: 'This VIP code has already been used' })
-    }
-
-    // Check if user already has VIP status
-    const existingTokens = await db.prepare(
-      'SELECT id, is_vip, total_tokens, tokens_remaining FROM user_tokens WHERE user_id = ?'
-    ).get(req.userId)
-
-    if (existingTokens && existingTokens.is_vip) {
-      return res.status(400).json({ error: 'Your account already has VIP access' })
-    }
-
-    // Mark code as used
-    await db.prepare(
-      'UPDATE vip_codes SET is_used = 1, used_by_user_id = ?, used_at = datetime("now") WHERE id = ?'
-    ).run(req.userId, vipCode.id)
-
-    // Create or update token record
-    if (existingTokens) {
-      // Update existing (add VIP tokens to balance)
-      const currentTotal = existingTokens.total_tokens || 0
-      const currentRemaining = existingTokens.tokens_remaining || 0
-      const nextTotal = currentTotal + vipCode.token_allowance
-      const nextRemaining = currentRemaining + vipCode.token_allowance
-      await db.prepare(
-        'UPDATE user_tokens SET is_vip = 1, vip_code_id = ?, total_tokens = ?, tokens_remaining = ?, updated_at = datetime("now") WHERE user_id = ?'
-      ).run(vipCode.id, nextTotal, nextRemaining, req.userId)
-    } else {
-      // Create new VIP token record
-      await db.prepare(
-        'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, vip_code_id, is_vip) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(req.userId, vipCode.token_allowance, 0, vipCode.token_allowance, vipCode.id, 1)
-    }
-
-    const updatedTokens = await db.prepare(
-      'SELECT * FROM user_tokens WHERE user_id = ?'
-    ).get(req.userId)
+    const updatedTokens = await redeemVipCodeForUser(req.userId, code)
 
     res.json({
       message: 'VIP code redeemed successfully!',
@@ -880,7 +913,7 @@ app.post('/api/auth/redeem-vip-code', authMiddleware, async (req, res) => {
     })
   } catch (err) {
     console.error('VIP redemption error:', err)
-    res.status(500).json({ error: 'Failed to redeem VIP code' })
+    res.status(err.status || 500).json({ error: err.message || 'Failed to redeem VIP code' })
   }
 })
 

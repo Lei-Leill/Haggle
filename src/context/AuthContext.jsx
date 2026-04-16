@@ -45,8 +45,8 @@ export function AuthProvider({ children }) {
     return u
   }, [])
 
-  const register = useCallback(async (email, password, name) => {
-    const { user: u, token } = await api.register({ email, password, name })
+  const register = useCallback(async (email, password, name, vipCode = '') => {
+    const { user: u, token } = await api.register({ email, password, name, vipCode })
     api.setToken(token)
     localStorage.setItem('haggle_user', JSON.stringify(u))
     setUser(u)
