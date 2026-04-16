@@ -592,19 +592,27 @@ app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
     if (!content?.trim() && !hasImages) {
       return res.status(400).json({ error: 'Message content or image is required' })
     }
-    const chat = await db.prepare('SELECT id, title FROM chats WHERE id = ? AND user_id = ?').get(chatId, req.userId)
+    const chat = await db.prepare('SELECT id, title, parent_id FROM chats WHERE id = ? AND user_id = ?').get(chatId, req.userId)
     if (!chat) return res.status(404).json({ error: 'Chat not found' })
 
     // ===== Token Check =====
-    const userTokens = await db.prepare(
+    let userTokens = await db.prepare(
       'SELECT tokens_remaining FROM user_tokens WHERE user_id = ?'
     ).get(req.userId)
 
     if (!userTokens) {
-      // Create free trial record if missing
-      await db.prepare(
-        'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, is_vip) VALUES (?, ?, ?, ?, ?)'
-      ).run(req.userId, 1000, 0, 1000, 0)
+      // Create free trial record if missing (handle potential race condition)
+      try {
+        await db.prepare(
+          'INSERT INTO user_tokens (user_id, total_tokens, tokens_used, tokens_remaining, is_vip) VALUES (?, ?, ?, ?, ?)'
+        ).run(req.userId, 1000, 0, 1000, 0)
+        userTokens = { tokens_remaining: 1000 }
+      } catch (err) {
+        // If insert fails (race condition or already exists), just fetch it
+        userTokens = await db.prepare(
+          'SELECT tokens_remaining FROM user_tokens WHERE user_id = ?'
+        ).get(req.userId) || { tokens_remaining: 1000 }
+      }
     }
 
     const estimatedUserTokens = estimateTokenUsage(content)
@@ -944,9 +952,9 @@ app.post('/api/request-tokens', authMiddleware, async (req, res) => {
 // Simple admin check - in production, use a proper role/permission system
 function isAdmin(req) {
   const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
-  // Get user email from auth token
-  const user = req.user || {}
-  return adminEmails.length === 0 || adminEmails.includes(user.email?.toLowerCase())
+  // Get user email from auth token (set by authMiddleware as req.userEmail)
+  const userEmail = req.userEmail || ''
+  return adminEmails.length === 0 || adminEmails.includes(userEmail.toLowerCase())
 }
 
 // Admin: List all token requests (with filtering)
